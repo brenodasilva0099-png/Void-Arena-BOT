@@ -1,0 +1,18 @@
+Void Arena / Abyss Tourment Game v3.9
+
+Correção principal:
+- Prints/imagens/anexos enviados no canal vinculado do Discord agora carregam no site.
+- O site também tenta recuperar anexos de mensagens antigas salvas sem anexo, usando discordMessageId e discordChannelId.
+
+Afeta:
+- Chat do torneio.
+- Estatísticas.
+
+Não mexe em:
+- Chaveamento.
+- Times cadastrados.
+- Banco central de times.
+
+Observação:
+- Para recuperar anexos antigos, o bot precisa estar online e ter acesso ao canal Discord vinculado.
+- Se o Discord apagar/expirar o anexo ou o bot não tiver permissão de ver o canal, não tem como recuperar.

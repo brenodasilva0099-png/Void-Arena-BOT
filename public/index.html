@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Hollow Nexus Tournament | Painel</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="stars"></div>
+  <div class="glow glow-one"></div>
+  <div class="glow glow-two"></div>
+
+  <div class="pitch-overlay" aria-hidden="true">
+    <div class="pitch-center-line"></div>
+    <div class="pitch-center-circle"></div>
+    <div class="goal goal-left"></div>
+    <div class="goal goal-right"></div>
+  </div>
+
+  <div class="floating-balls" aria-hidden="true">
+    <span class="ball ball-1"></span>
+    <span class="ball ball-2"></span>
+    <span class="ball ball-3"></span>
+    <span class="ball ball-4"></span>
+    <span class="ball ball-5"></span>
+    <span class="ball ball-6"></span>
+    <span class="ball ball-7"></span>
+  </div>
+
+  <main class="login-shell">
+    <section class="hero-panel panel-float">
+      <div>
+        <div class="brand-row">
+          <div class="brand-mark brand-image">
+            <img src="/assets/abyss-profile.png" alt="Perfil Abyss" />
+          </div>
+          <div>
+            <p class="eyebrow">Servidor Hollow Nexus</p>
+            <h1 class="brand-title">Hollow Nexus Tournament</h1>
+          </div>
+        </div>
+      </div>
+
+      <div class="hero-message-card">
+        <span class="mini-badge">Entrada Hollow Nexus</span>
+        <h3>Entre no painel da Hollow Nexus, registre sua equipe e acompanhe os jogos do torneio.</h3>
+        <p>
+          A área do painel será a base para inscrição das equipes, gerenciamento do elenco,
+          acompanhamento das partidas e controle do campeonato.
+        </p>
+
+        <div class="hero-chip-grid">
+          <span class="hero-chip">Cadastro de jogador</span>
+          <span class="hero-chip">Cadastro de time</span>
+          <span class="hero-chip">Jogos ativos</span>
+          <span class="hero-chip">Painel competitivo</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="auth-panel panel-float delay-2">
+      <div class="auth-header">
+        <p class="eyebrow">Acesso ao painel</p>
+        <h2>Entrar na conta</h2>
+        <p>Faça login para acessar a área do torneio. A Steam fica para uma fase futura.</p>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab active" type="button" data-tab="login">Entrar</button>
+        <button class="tab" type="button" data-tab="register">Criar conta</button>
+      </div>
+
+      <form id="loginForm" class="auth-form active">
+        <label>
+          E-mail
+          <input name="email" type="email" placeholder="seuemail@exemplo.com" autocomplete="email" required />
+        </label>
+        <label>
+          Senha
+          <input name="password" type="password" placeholder="Sua senha" autocomplete="current-password" required />
+        </label>
+        <button class="btn primary" type="submit">Entrar</button>
+      </form>
+
+      <form id="registerForm" class="auth-form">
+        <label>
+          Nome de usuário
+          <input name="name" type="text" placeholder="Nome do capitão/jogador" autocomplete="name" required />
+        </label>
+        <label>
+          E-mail
+          <input name="email" type="email" placeholder="seuemail@exemplo.com" autocomplete="email" required />
+        </label>
+        <label>
+          Senha
+          <input name="password" type="password" placeholder="Mínimo 6 caracteres" autocomplete="new-password" required />
+        </label>
+        <button class="btn primary" type="submit">Criar conta</button>
+      </form>
+
+      <div class="separator"><span>ou</span></div>
+
+      <a class="btn discord" href="/auth/discord">Entrar com Discord</a>
+
+      <p id="authMessage" class="auth-message" role="status"></p>
+    </section>
+  </main>
+
+  <script src="/js/auth.js"></script>
+</body>
+</html>

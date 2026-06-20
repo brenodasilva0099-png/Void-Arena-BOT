@@ -1,0 +1,28 @@
+{
+  "name": "abyss-tourment-game",
+  "version": "4.4",
+  "description": "Sistema separado do Abyss para torneios/campeonatos/copa do jogo Rematch.",
+  "main": "bot/index.js",
+  "scripts": {
+    "start": "node bot/index.js",
+    "dev": "node bot/index.js",
+    "render:start": "node bot/index.js"
+  },
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "rematch",
+    "tournament",
+    "abyss",
+    "dashboard"
+  ],
+  "author": "Projeto Abyss",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "discord.js": "^14.22.1",
+    "dotenv": "^16.6.1",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0"
+  }
+}

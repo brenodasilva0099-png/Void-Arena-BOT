@@ -1,0 +1,18 @@
+Abyss Tourment Game v3.8.2 — Estatísticas vinculadas ao Discord
+
+Base: v3.8.1 com sidebar H / Midnight Blend e notificações.
+
+Correções/adições:
+- Preserva o banco data/abyss-tournament-db.json e data/teams.json.
+- Adiciona fallback para reler teams.json se o banco central estiver vazio.
+- Move o botão Estatísticas para abaixo do botão Times.
+- Botão Estatísticas agora abre um painel com as mesmas funções do Chat:
+  - selecionar canal do Discord;
+  - enviar mensagem do site para o canal vinculado;
+  - ler mensagens enviadas no Discord;
+  - mostrar notificações/toasts e badge de não lidas.
+- Chat e Estatísticas têm configuração de canal separada.
+
+Segurança:
+- O arquivo .env foi removido do ZIP.
+- Preencha localmente copiando .env.example para .env.

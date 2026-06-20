@@ -1,0 +1,15 @@
+Abyss Tourment Game v4.0 — Imagens/prints do Discord no site
+
+Correção principal:
+- Prints/imagens enviadas no canal vinculado do Discord agora são capturadas como anexos/embeds e renderizadas no site.
+- O bot registra no terminal quantos attachments/embeds recebeu.
+- O site tenta buscar novamente a mensagem original do Discord para recuperar anexos atrasados.
+
+Se ainda aparecer aviso de payload vazio:
+1. Abra Discord Developer Portal > Applications > bot > Bot.
+2. Ative Message Content Intent.
+3. Confira se o bot tem permissão de Ver Canal, Ler Histórico e Ver Anexos no canal vinculado.
+4. Reinicie com npm start.
+
+Comando único:
+cd "$HOME/Downloads" && rm -rf "Abyss_Tourment_Game_v4.0" && unzip -q "Abyss_Tourment_Game_v4.0.zip" && cd "Abyss_Tourment_Game_v4.0/Abyss Tourment Game" && npm install && npm start

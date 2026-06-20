@@ -1,0 +1,14 @@
+Void Arena / Abyss Tourment Game — v3.8.1
+
+Alterações feitas:
+- Botão Estatísticas adicionado abaixo do botão Chat na lateral.
+- Botão Estatísticas está apenas reservado; não abre modal e não tem conteúdo ainda.
+- Sistema de notificação no site para novas mensagens do Chat do Torneio.
+- Quando chegar mensagem pelo Discord vinculado ou pelo site, o painel mostra badge no botão Chat e toast no canto direito.
+- Ao abrir o Chat do Torneio, as notificações são marcadas como lidas.
+- A ponte Discord ↔ Site continua usando o canal configurado no próprio painel.
+
+Segurança:
+- .env não foi incluído no ZIP final.
+- .env.example foi sanitizado para não reenviar token/secret.
+- Cole o token e secret localmente no arquivo .env.

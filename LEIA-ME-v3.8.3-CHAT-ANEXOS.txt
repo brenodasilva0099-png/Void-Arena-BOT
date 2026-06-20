@@ -1,0 +1,20 @@
+Abyss Tourment Game v3.8.3 — Chat com imagens/anexos do Discord
+
+Correção:
+- Imagens/prints enviadas no canal vinculado do Discord agora aparecem no chat do site.
+- Arquivos não-imagem aparecem como link de anexo.
+- Funciona no Chat e no painel Estatísticas, pois ambos usam o mesmo renderizador.
+- Notificações do site agora mostram “Enviou uma imagem.” quando a mensagem vem sem texto e com anexo.
+
+Observação:
+- O Discord fornece URLs de anexos. Se uma imagem antiga não carregar depois de muito tempo, pode ser expiração/controle do próprio Discord.
+- Para imagens novas enviadas no canal vinculado, o site deve carregar normalmente.
+- Não alteramos o chaveamento nem os times.
+
+Testes:
+- node --check public/js/dashboard.js
+- node --check server/app.js
+- node --check server/storage.js
+- node --check bot/index.js
+- npm install
+- servidor abriu / e /pages/dashboard.html com status 200
