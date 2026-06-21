@@ -242,7 +242,82 @@ async function autoRestoreLatestBackup(storage) {
   };
 }
 
+
+async function listGithubDirectory(config, dirPath) {
+  const encodedPath = dirPath.split('/').map(encodeURIComponent).join('/');
+
+  try {
+    const data = await githubRequest(config, `/contents/${encodedPath}?ref=${encodeURIComponent(config.branch)}`, {
+      method: 'GET'
+    });
+
+    return Array.isArray(data) ? data : [];
+  } catch (error) {
+    if (error.status === 404) return [];
+    throw error;
+  }
+}
+
+async function listBackupsFromGitHub(options = {}) {
+  const config = requireConfig();
+  const limit = Math.max(1, Math.min(100, Number(options.limit || 25)));
+  const monthDirs = await listGithubDirectory(config, 'backups');
+
+  const files = [];
+
+  for (const dir of monthDirs.filter((item) => item.type === 'dir').slice(-8).reverse()) {
+    const entries = await listGithubDirectory(config, dir.path);
+    files.push(...entries.filter((item) => item.type === 'file' && item.name.endsWith('.json')));
+    if (files.length >= limit) break;
+  }
+
+  const backups = [];
+
+  for (const file of files.slice(0, limit)) {
+    const content = await fetchBackupFromGitHubPath(file.path).catch(() => null);
+    if (!content) continue;
+
+    backups.push({
+      path: file.path,
+      name: file.name,
+      savedAt: content.githubBackup?.savedAt || content.exportedAt || null,
+      exportedAt: content.exportedAt || null,
+      reason: content.githubBackup?.reason || '',
+      summary: content.summary || {}
+    });
+  }
+
+  return backups.sort((a, b) => new Date(b.savedAt || 0).getTime() - new Date(a.savedAt || 0).getTime());
+}
+
+async function fetchBackupFromGitHubPath(filePath) {
+  const config = requireConfig();
+  const file = await readGithubFile(config, filePath);
+
+  if (!file?.content) {
+    throw new Error(`Backup não encontrado: ${filePath}`);
+  }
+
+  return JSON.parse(decodeBase64Utf8(file.content));
+}
+
+async function restoreBackupFromGitHubPath(storage, filePath) {
+  const backup = await fetchBackupFromGitHubPath(filePath);
+  const result = await storage.importDatabaseBackup(backup);
+
+  return {
+    success: true,
+    restoredFromGithub: true,
+    path: filePath,
+    backupExportedAt: backup.exportedAt || null,
+    result
+  };
+}
+
 module.exports = {
+  restoreBackupFromGitHubPath,
+  fetchBackupFromGitHubPath,
+  listBackupsFromGitHub,
   getConfig,
   saveBackupToGitHub,
   fetchLatestBackupFromGitHub,
