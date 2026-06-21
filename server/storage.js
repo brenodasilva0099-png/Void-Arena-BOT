@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const zlib = require('node:zlib');
 
 const PROJECT_DATA_DIR = path.join(__dirname, '..', 'data');
 const DATA_DIR = process.env.DATA_DIR
@@ -968,7 +969,82 @@ async function updateTeamChatMessage(conversationId, messageId, updates = {}, op
 }
 
 
+function summarizeDatabase(db = {}) {
+  return {
+    users: Array.isArray(db.users) ? db.users.length : 0,
+    teams: Array.isArray(db.teams) ? db.teams.length : 0,
+    events: Array.isArray(db.events) ? db.events.length : 0,
+    messages: Array.isArray(db.messages) ? db.messages.length : 0,
+    messageArchives: Array.isArray(db.messageArchives) ? db.messageArchives.length : 0,
+    teamChats: Array.isArray(db.teamChats) ? db.teamChats.length : 0,
+    bracketSlots: Array.isArray(db.bracket?.slots) ? db.bracket.slots.filter(Boolean).length : 0,
+    updatedAt: db.meta?.updatedAt || null
+  };
+}
+
+async function exportDatabaseBackup() {
+  const db = await readDatabase();
+  const rawJson = JSON.stringify(db);
+  const compressed = zlib.gzipSync(Buffer.from(rawJson, 'utf8')).toString('base64');
+
+  return {
+    success: true,
+    type: 'void-arena-database-backup',
+    version: 1,
+    format: 'gzip-base64-json',
+    exportedAt: new Date().toISOString(),
+    source: {
+      dataDir: DATA_DIR,
+      dbFile: DB_FILE
+    },
+    summary: summarizeDatabase(db),
+    database: compressed
+  };
+}
+
+async function importDatabaseBackup(payload = {}) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Backup inválido.');
+  }
+
+  let rawDatabase = null;
+
+  if (payload.type === 'void-arena-database-backup' && payload.format === 'gzip-base64-json' && payload.database) {
+    const buffer = Buffer.from(String(payload.database || ''), 'base64');
+    rawDatabase = JSON.parse(zlib.gunzipSync(buffer).toString('utf8'));
+  } else if (payload.database && typeof payload.database === 'object') {
+    rawDatabase = payload.database;
+  } else if (Array.isArray(payload.users) || Array.isArray(payload.teams) || payload.bracket || payload.settings) {
+    rawDatabase = payload;
+  }
+
+  if (!rawDatabase || typeof rawDatabase !== 'object') {
+    throw new Error('Backup sem banco de dados válido.');
+  }
+
+  const normalized = normalizeDatabase(rawDatabase);
+  normalized.meta = {
+    ...(normalized.meta || {}),
+    importedAt: new Date().toISOString(),
+    importedFromBackup: true,
+    importedBackupExportedAt: payload.exportedAt || null,
+    restoredIntoDataDir: DATA_DIR
+  };
+
+  await writeDatabase(normalized, { mirrorLegacy: true });
+
+  return {
+    success: true,
+    importedAt: normalized.meta.importedAt,
+    summary: summarizeDatabase(normalized),
+    status: await readDatabaseStatus()
+  };
+}
+
+
 module.exports = {
+  exportDatabaseBackup,
+  importDatabaseBackup,
   readDatabaseStatus,
   readEvents,
   saveTournamentEvent,

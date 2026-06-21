@@ -265,7 +265,7 @@ async function importDiscordHistory(client, { discordChannelId, siteChannelId, l
 
 function startInternalApi({ client, port = 3002 } = {}) {
   const app = express();
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '25mb' }));
 
   app.get("/public/guild-icon.png", async (_req, res) => {
     try {
@@ -313,6 +313,27 @@ function startInternalApi({ client, port = 3002 } = {}) {
       guilds: client?.guilds?.cache?.size || 0,
       database
     });
+  });
+
+
+  app.get('/internal/backup/export', async (_req, res) => {
+    try {
+      const backup = await storage.exportDatabaseBackup();
+      res.set('Content-Type', 'application/json; charset=utf-8');
+      res.set('Content-Disposition', `attachment; filename="void-arena-backup-${Date.now()}.json"`);
+      return res.json(backup);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post('/internal/backup/import', async (req, res) => {
+    try {
+      const result = await storage.importDatabaseBackup(req.body || {});
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
   });
 
   app.post('/internal/storage/:method', async (req, res) => {
