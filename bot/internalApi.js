@@ -2,12 +2,21 @@ const express = require('express');
 const { ChannelType } = require('discord.js');
 const { extractDiscordMessageAttachments } = require('./discordClient');
 const storage = require('../server/storage');
+const githubBackups = require('../server/githubBackups');
 const {
   readChatMessages,
   saveChatMessage
 } = storage;
 
 const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
+
+let maintenanceState = {
+  enabled: false,
+  message: '',
+  etaMinutes: 0,
+  startedAt: null,
+  updatedAt: null
+};
 
 const STORAGE_METHODS = new Set([
   'readDatabaseStatus',
@@ -301,6 +310,14 @@ function startInternalApi({ client, port = 3002 } = {}) {
     }
   });
 
+
+  app.get('/public/maintenance', (_req, res) => {
+    return res.json({
+      success: true,
+      maintenance: maintenanceState
+    });
+  });
+
   app.use(requireInternalToken);
 
   app.get('/internal/health', async (_req, res) => {
@@ -334,6 +351,65 @@ function startInternalApi({ client, port = 3002 } = {}) {
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
     }
+  });
+
+
+  app.post('/internal/backup/github/export', async (req, res) => {
+    try {
+      const manifest = await githubBackups.saveBackupToGitHub(storage, {
+        reason: req.body?.reason || 'manual'
+      });
+      return res.json({ success: true, manifest });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get('/internal/backup/github/latest', async (_req, res) => {
+    try {
+      const backup = await githubBackups.fetchLatestBackupFromGitHub();
+      return res.json({
+        success: true,
+        exportedAt: backup.exportedAt || null,
+        summary: backup.summary || null,
+        githubBackup: backup.githubBackup || null
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post('/internal/backup/github/restore-latest', async (_req, res) => {
+    try {
+      const result = await githubBackups.restoreLatestBackupFromGitHub(storage);
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post('/internal/maintenance/start', async (req, res) => {
+    maintenanceState = {
+      enabled: true,
+      message: String(req.body?.message || 'Void Arena está atualizando. Voltamos em instantes.'),
+      etaMinutes: Number(req.body?.etaMinutes || 3) || 3,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    return res.json({ success: true, maintenance: maintenanceState });
+  });
+
+  app.post('/internal/maintenance/stop', async (_req, res) => {
+    maintenanceState = {
+      enabled: false,
+      message: '',
+      etaMinutes: 0,
+      startedAt: maintenanceState.startedAt || null,
+      updatedAt: new Date().toISOString()
+    };
+
+    return res.json({ success: true, maintenance: maintenanceState });
   });
 
   app.post('/internal/storage/:method', async (req, res) => {
