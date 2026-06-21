@@ -1,1 +1,0 @@
-temporary marker for replacing repository with Void Arena bot v4.11
