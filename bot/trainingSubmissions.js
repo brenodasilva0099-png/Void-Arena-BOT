@@ -152,15 +152,27 @@ async function downloadAttachmentBuffer(attachment) {
 }
 
 async function publishTrainingLog(client, interaction, payload) {
-  const channelId = process.env.TRAINING_LOG_CHANNEL_ID || process.env.TRAINING_CHANNEL_ID || interaction.channelId;
+  const channelId = String(process.env.TRAINING_LOG_CHANNEL_ID || '').trim();
+
+  if (!channelId) {
+    return {
+      discordChannelId: '',
+      discordMessageId: '',
+      video: payload.video,
+      mirrored: false,
+      mirrorSkipped: 'TRAINING_LOG_CHANNEL_ID não configurado'
+    };
+  }
+
   const channel = await client.channels.fetch(channelId).catch(() => null);
 
   if (!channel?.send) {
     return {
-      discordChannelId: interaction.channelId,
+      discordChannelId: '',
       discordMessageId: '',
       video: payload.video,
-      mirrored: false
+      mirrored: false,
+      mirrorSkipped: 'Canal privado de treinos inválido ou sem permissão'
     };
   }
 
