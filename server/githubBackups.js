@@ -101,7 +101,7 @@ async function saveBackupToGitHub(storage, options = {}) {
     const latestTeams = Number(latest?.summary?.teams || 0);
     const latestUsers = Number(latest?.summary?.users || 0);
 
-    if (nextTeams === 0 && latestTeams > 0) {
+    if (nextTeams < latestTeams && latestTeams > 0) {
       return {
         success: true,
         skipped: true,
@@ -226,7 +226,7 @@ async function autoRestoreLatestBackup(storage) {
     return restoreLatestBackupFromGitHub(storage);
   }
 
-  if (currentTeams === 0 && latestTeams > 0) {
+  if (latestTeams > currentTeams) {
     return restoreLatestBackupFromGitHub(storage);
   }
 
