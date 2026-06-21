@@ -44,7 +44,8 @@ const EMPTY_DATABASE = {
   messages: [],
   messageArchives: [],
   teamChats: [],
-  events: []
+  events: [],
+  trainingSubmissions: []
 };
 
 
@@ -227,6 +228,54 @@ function normalizeTeamChat(raw = {}) {
   };
 }
 
+function normalizeTrainingVideo(raw = {}) {
+  return {
+    id: String(raw.id || '').trim(),
+    url: String(raw.url || '').trim(),
+    proxyUrl: String(raw.proxyUrl || raw.proxyURL || '').trim(),
+    name: String(raw.name || raw.filename || 'treino.mp4').trim().slice(0, 160),
+    contentType: String(raw.contentType || raw.content_type || '').trim().slice(0, 120),
+    size: Number(raw.size || 0) || 0,
+    width: Number(raw.width || 0) || 0,
+    height: Number(raw.height || 0) || 0,
+    ephemeral: Boolean(raw.ephemeral)
+  };
+}
+
+function normalizeTrainingSubmission(raw = {}) {
+  const now = new Date().toISOString();
+  const status = ['pending', 'reviewed', 'approved', 'rejected', 'archived'].includes(String(raw.status || '').toLowerCase())
+    ? String(raw.status).toLowerCase()
+    : 'pending';
+
+  return {
+    id: String(raw.id || `training_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+    playerId: String(raw.playerId || '').trim(),
+    playerDiscordId: String(raw.playerDiscordId || raw.discordId || '').trim(),
+    playerName: String(raw.playerName || 'Jogador').trim().slice(0, 100),
+    playerAvatar: String(raw.playerAvatar || '').trim(),
+    teamId: String(raw.teamId || '').trim(),
+    guildId: String(raw.guildId || '').trim(),
+    type: String(raw.type || 'Treino').trim().slice(0, 80),
+    position: String(raw.position || '').trim().slice(0, 80),
+    description: String(raw.description || '').trim().slice(0, 900),
+    video: normalizeTrainingVideo(raw.video || {}),
+    originalVideo: normalizeTrainingVideo(raw.originalVideo || raw.video || {}),
+    discordChannelId: String(raw.discordChannelId || '').trim(),
+    discordMessageId: String(raw.discordMessageId || '').trim(),
+    mirroredToDiscord: Boolean(raw.mirroredToDiscord),
+    mirrorError: String(raw.mirrorError || '').trim().slice(0, 240),
+    status,
+    reviewNote: String(raw.reviewNote || '').trim().slice(0, 900),
+    reviewedBy: String(raw.reviewedBy || '').trim(),
+    reviewedAt: raw.reviewedAt || null,
+    createdAt: raw.createdAt || now,
+    updatedAt: raw.updatedAt || raw.createdAt || now
+  };
+}
+
+
+
 function normalizeDatabase(raw = {}) {
   const now = new Date().toISOString();
   const db = clone(EMPTY_DATABASE);
@@ -260,6 +309,9 @@ function normalizeDatabase(raw = {}) {
     ? raw.teamChats.map(normalizeTeamChat).filter((chat) => (chat.type === 'direct' ? chat.participantIds.length >= 2 : chat.teamIds.length >= 2))
     : [];
   db.events = normalizeTournamentEvents(raw.events || raw.settings?.events || []);
+  db.trainingSubmissions = Array.isArray(raw.trainingSubmissions)
+    ? raw.trainingSubmissions.map(normalizeTrainingSubmission).slice(-1000)
+    : [];
 
   return db;
 }
@@ -379,6 +431,7 @@ async function readDatabaseStatus() {
     messageArchives: Array.isArray(db.messageArchives) ? db.messageArchives.length : 0,
     teamChats: Array.isArray(db.teamChats) ? db.teamChats.length : 0,
     events: Array.isArray(db.events) ? db.events.length : 0,
+    trainingSubmissions: Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions.length : 0,
     bracketSlots: Array.isArray(db.bracket.slots) ? db.bracket.slots.filter(Boolean).length : 0
   };
 }
@@ -969,11 +1022,80 @@ async function updateTeamChatMessage(conversationId, messageId, updates = {}, op
 }
 
 
+async function readTrainingSubmissions(options = {}) {
+  const db = await readDatabase();
+  const limit = Math.max(1, Math.min(200, Number(options.limit || 80)));
+  const playerDiscordId = String(options.playerDiscordId || '').trim();
+  const playerId = String(options.playerId || '').trim();
+  const status = String(options.status || '').trim().toLowerCase();
+
+  return (Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions : [])
+    .map(normalizeTrainingSubmission)
+    .filter((item) => !playerDiscordId || item.playerDiscordId === playerDiscordId)
+    .filter((item) => !playerId || item.playerId === playerId)
+    .filter((item) => !status || item.status === status)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, limit);
+}
+
+async function saveTrainingSubmission(payload = {}) {
+  const now = new Date().toISOString();
+  const normalized = normalizeTrainingSubmission({
+    ...payload,
+    id: payload.id || `training_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    createdAt: payload.createdAt || now,
+    updatedAt: now
+  });
+
+  return updateDatabase((db) => {
+    db.trainingSubmissions = Array.isArray(db.trainingSubmissions)
+      ? db.trainingSubmissions.map(normalizeTrainingSubmission)
+      : [];
+
+    const index = db.trainingSubmissions.findIndex((item) => item.id === normalized.id);
+    if (index >= 0) db.trainingSubmissions[index] = normalized;
+    else db.trainingSubmissions.push(normalized);
+
+    db.trainingSubmissions = db.trainingSubmissions.slice(-1000);
+    return normalized;
+  });
+}
+
+async function updateTrainingSubmissionStatus(id, updates = {}) {
+  const safeId = String(id || '').trim();
+  if (!safeId) throw new Error('Envio de treino inválido.');
+
+  return updateDatabase((db) => {
+    db.trainingSubmissions = Array.isArray(db.trainingSubmissions)
+      ? db.trainingSubmissions.map(normalizeTrainingSubmission)
+      : [];
+
+    const index = db.trainingSubmissions.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Envio de treino não encontrado.');
+
+    const current = normalizeTrainingSubmission(db.trainingSubmissions[index]);
+    const next = normalizeTrainingSubmission({
+      ...current,
+      status: updates.status || current.status,
+      reviewNote: updates.reviewNote ?? current.reviewNote,
+      reviewedBy: updates.reviewedBy || current.reviewedBy,
+      reviewedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    db.trainingSubmissions[index] = next;
+    return next;
+  });
+}
+
+
+
 function summarizeDatabase(db = {}) {
   return {
     users: Array.isArray(db.users) ? db.users.length : 0,
     teams: Array.isArray(db.teams) ? db.teams.length : 0,
     events: Array.isArray(db.events) ? db.events.length : 0,
+    trainingSubmissions: Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions.length : 0,
     messages: Array.isArray(db.messages) ? db.messages.length : 0,
     messageArchives: Array.isArray(db.messageArchives) ? db.messageArchives.length : 0,
     teamChats: Array.isArray(db.teamChats) ? db.teamChats.length : 0,
@@ -1043,6 +1165,9 @@ async function importDatabaseBackup(payload = {}) {
 
 
 module.exports = {
+  updateTrainingSubmissionStatus,
+  saveTrainingSubmission,
+  readTrainingSubmissions,
   exportDatabaseBackup,
   importDatabaseBackup,
   readDatabaseStatus,

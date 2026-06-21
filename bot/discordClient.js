@@ -5,6 +5,7 @@ const {
   readChatBridgeSettings,
   readStatsBridgeSettings
 } = require('../server/storage');
+const { registerTrainingHandlers } = require('./trainingSubmissions');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
@@ -95,6 +96,7 @@ async function refreshSavedDiscordMessage(client, savedMessageId, siteChannelId,
 function registerDiscordHandlers(client) {
   if (!client || client.__voidArenaHandlersRegistered) return client;
   client.__voidArenaHandlersRegistered = true;
+  registerTrainingHandlers(client);
 
   client.once(Events.ClientReady, (readyClient) => {
     console.log(`✅ Bot online como ${readyClient.user.tag}`);

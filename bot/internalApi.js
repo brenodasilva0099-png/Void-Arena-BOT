@@ -50,6 +50,9 @@ const STORAGE_METHODS = new Set([
   'deleteTeam',
   'readBracket',
   'writeBracket',
+  'updateTrainingSubmissionStatus',
+  'saveTrainingSubmission',
+  'readTrainingSubmissions',
 ]);
 
 function discordChannelKind(type) {
