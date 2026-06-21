@@ -72,6 +72,19 @@ function canUseAsChatBridge(channel) {
   return channel?.type === ChannelType.GuildText || channel?.type === ChannelType.GuildAnnouncement;
 }
 
+function resolvePrimaryGuild(client) {
+  if (!client?.guilds?.cache?.size) return null;
+
+  const configuredGuildId = String(process.env.DISCORD_GUILD_ID || process.env.GUILD_ID || "").trim();
+  if (configuredGuildId) {
+    const configuredGuild = client.guilds.cache.get(configuredGuildId);
+    if (configuredGuild) return configuredGuild;
+  }
+
+  return client.guilds.cache.first() || null;
+}
+
+
 function requireInternalToken(req, res, next) {
   if (!INTERNAL_TOKEN) return next();
   const token = req.headers['x-bot-api-key'] || req.headers['x-internal-token'] || req.headers.authorization?.replace(/^Bearer\s+/i, '');
@@ -253,6 +266,41 @@ async function importDiscordHistory(client, { discordChannelId, siteChannelId, l
 function startInternalApi({ client, port = 3002 } = {}) {
   const app = express();
   app.use(express.json({ limit: '2mb' }));
+
+  app.get("/public/guild-icon.png", async (_req, res) => {
+    try {
+      const guild = resolvePrimaryGuild(client);
+      const iconUrl = guild?.iconURL?.({ extension: "png", size: 256 });
+
+      if (!iconUrl) {
+        return res.status(404).json({ success: false, message: "Servidor sem ícone ou bot ainda não conectado." });
+      }
+
+      res.set("Cache-Control", "public, max-age=300");
+      return res.redirect(iconUrl);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get("/public/guild-brand", async (_req, res) => {
+    try {
+      const guild = resolvePrimaryGuild(client);
+      const icon = guild?.iconURL?.({ extension: "png", size: 256 }) || null;
+
+      return res.json({
+        success: true,
+        guild: guild ? {
+          id: guild.id,
+          name: guild.name,
+          icon
+        } : null
+      });
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.use(requireInternalToken);
 
   app.get('/internal/health', async (_req, res) => {
