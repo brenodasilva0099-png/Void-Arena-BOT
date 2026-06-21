@@ -15,6 +15,7 @@ const githubBackups = require('../server/githubBackups');
 const BACKUP_SELECT_ID = 'backup:select';
 const BACKUP_RESTORE_PREFIX = 'backup:restore:';
 const BACKUP_CANCEL_PREFIX = 'backup:cancel:';
+const RESTORE_BEST_BUTTON_ID = 'backup:restore-best';
 
 function canManageBackups(member) {
   return Boolean(
@@ -56,13 +57,143 @@ function decodeBackupValue(value = '') {
   return Buffer.from(String(value || ''), 'base64url').toString('utf8');
 }
 
+
+function summarizeStatus(status = {}) {
+  return [
+    `Users: **${status.users || 0}**`,
+    `Times: **${status.teams || 0}**`,
+    `Eventos: **${status.events || 0}**`,
+    `Treinos: **${status.trainingSubmissions || 0}**`,
+    `Mensagens: **${status.messages || 0}**`
+  ].join(' • ');
+}
+
+async function findBestBackup() {
+  const backups = await githubBackups.listBackupsFromGitHub({ limit: 50 });
+  return backups.find((item) => Number(item.summary?.teams || 0) > 0) || null;
+}
+
+async function restoreBestBackup() {
+  const best = await findBestBackup();
+
+  if (!best) {
+    return {
+      success: false,
+      message: 'Não encontrei nenhum backup bom com times no GitHub.'
+    };
+  }
+
+  const result = await githubBackups.restoreBackupFromGitHubPath(storage, best.path);
+
+  return {
+    success: true,
+    backup: best,
+    result
+  };
+}
+
+async function handleDbStatus(message) {
+  const current = await storage.readDatabaseStatus();
+  const best = await findBestBackup();
+
+  const embed = new EmbedBuilder()
+    .setTitle('📦 Status do banco Void Arena')
+    .setColor(Number(current.teams || 0) > 0 ? 0x22c55e : 0xf59e0b)
+    .addFields(
+      {
+        name: 'Banco atual do BOT',
+        value: summarizeStatus(current)
+      },
+      {
+        name: 'Melhor backup no GitHub',
+        value: best
+          ? `${summarizeStatus(best.summary || {})}\nArquivo: \`${best.path}\`\nData: ${formatDate(best.savedAt || best.exportedAt)}`
+          : 'Nenhum backup bom com times encontrado.'
+      }
+    );
+
+  const components = [];
+
+  if (Number(current.teams || 0) === 0 && best) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(RESTORE_BEST_BUTTON_ID)
+          .setLabel('Restaurar backup bom')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success)
+      )
+    );
+  }
+
+  await message.reply({ embeds: [embed], components });
+}
+
+async function handleRestoreBestBackup(message) {
+  const loading = await message.reply('🔄 Procurando backup bom no GitHub...');
+
+  const restored = await restoreBestBackup();
+
+  if (!restored.success) {
+    await loading.edit(`❌ ${restored.message}`);
+    return;
+  }
+
+  const summary = restored.result?.result?.summary || {};
+
+  await loading.edit(
+    `✅ Backup bom restaurado!\n` +
+    `Arquivo: \`${restored.backup.path}\`\n` +
+    `Users: **${summary.users || 0}** • Times: **${summary.teams || 0}** • Eventos: **${summary.events || 0}** • Treinos: **${summary.trainingSubmissions || 0}**`
+  );
+}
+
+async function handleRestoreBestButton(interaction) {
+  if (!canManageBackups(interaction.member)) {
+    await interaction.reply({ content: '❌ Você não tem permissão para restaurar backups.', ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const restored = await restoreBestBackup();
+
+  if (!restored.success) {
+    await interaction.editReply(`❌ ${restored.message}`);
+    return;
+  }
+
+  const summary = restored.result?.result?.summary || {};
+
+  await interaction.editReply(
+    `✅ Backup bom restaurado!\n` +
+    `Arquivo: \`${restored.backup.path}\`\n` +
+    `Users: **${summary.users || 0}** • Times: **${summary.teams || 0}** • Eventos: **${summary.events || 0}** • Treinos: **${summary.trainingSubmissions || 0}**`
+  );
+}
+
 async function handleBackupNow(message) {
   const status = await storage.readDatabaseStatus();
 
   if (Number(status.teams || 0) === 0) {
-    await message.reply(
-      '⚠️ O banco atual está com **0 times**. Por segurança, não vou salvar esse backup por cima do backup bom. Restaure o backup bom primeiro.'
-    );
+    const best = await findBestBackup();
+
+    const components = best
+      ? [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(RESTORE_BEST_BUTTON_ID)
+              .setLabel('Restaurar backup bom')
+              .setEmoji('✅')
+              .setStyle(ButtonStyle.Success)
+          )
+        ]
+      : [];
+
+    await message.reply({
+      content: '⚠️ O banco atual está com **0 times**. Por segurança, não vou salvar esse backup por cima do backup bom.',
+      components
+    });
     return;
   }
 
@@ -206,6 +337,24 @@ function registerBackupManager(client) {
 
       const content = message.content.trim();
 
+      if (content === '.db-status') {
+        if (!canManageBackups(message.member)) {
+          await message.reply('❌ Apenas staff/admin pode ver o status do banco.');
+          return;
+        }
+
+        await handleDbStatus(message);
+      }
+
+      if (content === '.restore-bom') {
+        if (!canManageBackups(message.member)) {
+          await message.reply('❌ Apenas staff/admin pode restaurar backups.');
+          return;
+        }
+
+        await handleRestoreBestBackup(message);
+      }
+
       if (content === '.backup-agora') {
         if (!canManageBackups(message.member)) {
           await message.reply('❌ Apenas staff/admin pode criar backup manual.');
@@ -233,6 +382,11 @@ function registerBackupManager(client) {
     try {
       if (interaction.isStringSelectMenu?.() && interaction.customId === BACKUP_SELECT_ID) {
         await handleBackupSelect(interaction);
+        return;
+      }
+
+      if (interaction.isButton?.() && interaction.customId === RESTORE_BEST_BUTTON_ID) {
+        await handleRestoreBestButton(interaction);
         return;
       }
 
