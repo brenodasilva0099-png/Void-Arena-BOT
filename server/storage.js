@@ -57,6 +57,8 @@ const DEFAULT_TOURNAMENT_EVENTS = [
     matchFormat: 'MD3',
     structure: 'Grupos + Playoffs',
     teamLimit: 16,
+    minimumTeams: 4,
+    startAt: '',
     status: 'open',
     description: 'Campeonato principal da comunidade. Inscreva seu time, confira o limite de vagas e envie o comprovante pelo ticket do Discord.',
     registrations: [],
@@ -104,6 +106,8 @@ function normalizeTournamentEvent(raw = {}) {
     matchFormat: String(raw.matchFormat || 'MD3').trim().slice(0, 12),
     structure: String(raw.structure || 'Grupos + Playoffs').trim().slice(0, 60),
     teamLimit,
+    minimumTeams: Math.max(2, Math.min(teamLimit, Number(raw.minimumTeams || 4) || 4)),
+    startAt: String(raw.startAt || '').trim().slice(0, 40),
     status: ['open', 'closed', 'running', 'finished'].includes(String(raw.status || '').toLowerCase())
       ? String(raw.status).toLowerCase()
       : 'open',
@@ -612,6 +616,38 @@ async function registerTeamInEvent(eventId, teamId, userId = '') {
   });
 }
 
+
+async function saveTournamentEvent(payload = {}) {
+  return updateDatabase((db) => {
+    db.events = normalizeTournamentEvents(db.events);
+    const now = new Date().toISOString();
+    const eventId = String(payload.id || '').trim() || `event_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    const normalized = normalizeTournamentEvent({
+      ...payload,
+      id: eventId,
+      createdAt: payload.createdAt || now,
+      updatedAt: now,
+      registrations: Array.isArray(payload.registrations) ? payload.registrations : []
+    });
+
+    const index = db.events.findIndex((event) => event.id === eventId);
+    if (index >= 0) {
+      const current = normalizeTournamentEvent(db.events[index]);
+      db.events[index] = normalizeTournamentEvent({
+        ...current,
+        ...normalized,
+        registrations: Array.isArray(payload.registrations) ? payload.registrations : current.registrations,
+        createdAt: current.createdAt || normalized.createdAt,
+        updatedAt: now
+      });
+      return db.events[index];
+    }
+
+    db.events.push(normalized);
+    return normalized;
+  });
+}
+
 async function readChatMessages(options = {}) {
   const db = await readDatabase();
   const channelId = String(options.channelId || 'site-main').trim() || 'site-main';
@@ -935,6 +971,7 @@ async function updateTeamChatMessage(conversationId, messageId, updates = {}, op
 module.exports = {
   readDatabaseStatus,
   readEvents,
+  saveTournamentEvent,
   registerTeamInEvent,
   readTournamentSettings,
   writeTournamentSettings,

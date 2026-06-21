@@ -78,6 +78,7 @@ const openTeamChatBtn = document.querySelector('#openTeamChatBtn');
 const teamChatModal = document.querySelector('#teamChatModal');
 const closeTeamChatBtn = document.querySelector('#closeTeamChatBtn');
 const teamChatCreateForm = document.querySelector('#teamChatCreateForm');
+const scrimDirectoryGrid = document.querySelector('#scrimDirectoryGrid');
 const teamChatList = document.querySelector('#teamChatList');
 const teamChatMessages = document.querySelector('#teamChatMessages');
 const teamChatForm = document.querySelector('#teamChatForm');
@@ -112,11 +113,20 @@ const backToPlayerHomeBtn = document.querySelector('#backToPlayerHomeBtn');
 const playerHomeScreen = document.querySelector('#playerHomeScreen');
 const bracketScreen = document.querySelector('#bracketScreen');
 const homeCreateTeamBtn = document.querySelector('#homeCreateTeamBtn');
+const openCreateEventBtn = document.querySelector('#openCreateEventBtn');
+const editMainEventBtn = document.querySelector('#editMainEventBtn');
 const homeCreateTeamStepBtn = document.querySelector('#homeCreateTeamStepBtn');
 const homeJoinEventBtn = document.querySelector('#homeJoinEventBtn');
 const homeTeamChatBtn = document.querySelector('#homeTeamChatBtn');
 const homeRulesBtn = document.querySelector('#homeRulesBtn');
 const eventVagasLabel = document.querySelector('#eventVagasLabel');
+const mainEventTitle = document.querySelector('#mainEventTitle');
+const mainEventDescription = document.querySelector('#mainEventDescription');
+const eventModeValue = document.querySelector('#eventModeValue');
+const eventFormatValue = document.querySelector('#eventFormatValue');
+const eventStartValue = document.querySelector('#eventStartValue');
+const eventMinimumTeamsMeta = document.querySelector('#eventMinimumTeamsMeta');
+const eventsShowcaseList = document.querySelector('#eventsShowcaseList');
 const eventProgressBar = document.querySelector('#eventProgressBar');
 const eventRegisteredTeams = document.querySelector('#eventRegisteredTeams');
 const publicTeamsGrid = document.querySelector('#publicTeamsGrid');
@@ -125,6 +135,12 @@ const closeEventRegisterBtn = document.querySelector('#closeEventRegisterBtn');
 const eventRegisterChoices = document.querySelector('#eventRegisterChoices');
 const eventRegisterStatus = document.querySelector('#eventRegisterStatus');
 const rulesModal = document.querySelector('#rulesModal');
+const eventEditorModal = document.querySelector('#eventEditorModal');
+const eventEditorForm = document.querySelector('#eventEditorForm');
+const eventEditorTitle = document.querySelector('#eventEditorTitle');
+const eventEditorMessage = document.querySelector('#eventEditorMessage');
+const closeEventEditorBtn = document.querySelector('#closeEventEditorBtn');
+const cancelEventEditorBtn = document.querySelector('#cancelEventEditorBtn');
 const closeRulesBtn = document.querySelector('#closeRulesBtn');
 const closeTeamModalBtn = document.querySelector('#closeTeamModalBtn');
 const cancelTeamBtn = document.querySelector('#cancelTeamBtn');
@@ -170,6 +186,7 @@ let usersLookup = [];
 let currentUser = null;
 let currentEvents = [];
 let currentMainEvent = null;
+let currentEventId = 'coliseu-void-arena';
 let currentBracketData = {
   slots: Array(16).fill(null),
   quarters: Array(8).fill(null),
@@ -359,6 +376,7 @@ async function loadMe() {
 
   initCustomSelects(settingsForm || document);
   loadUserSocialSettings();
+  applyAdminMode();
 }
 
 function setLogoPreview(value) {
@@ -479,6 +497,121 @@ async function apiJson(url, options = {}) {
   return data;
 }
 
+
+function isAdminUser() {
+  return Boolean(currentUser?.isAdmin);
+}
+
+function applyAdminMode() {
+  document.querySelectorAll('.admin-only').forEach((element) => {
+    element.hidden = !isAdminUser();
+  });
+
+  if (toggleTournamentActionsBtn) toggleTournamentActionsBtn.hidden = !isAdminUser();
+  if (openTournamentConfigBtn) openTournamentConfigBtn.hidden = !isAdminUser();
+}
+
+function formatEventMode(event = {}) {
+  const rawMode = String(event?.mode || '').trim();
+  if (rawMode && rawMode.toLowerCase() !== 'rematch') return rawMode;
+  return String(event?.structure || rawMode || 'Mata-mata').trim() || 'Mata-mata';
+}
+
+function setCurrentMainEvent(eventId) {
+  currentEventId = String(eventId || '').trim() || currentEventId;
+  currentMainEvent = mainEvent();
+  renderPlayerHomeData();
+}
+
+function eventStartText(event = {}) {
+  return String(event?.startAt || '').trim() || 'Em breve';
+}
+
+function renderMainEventSummary(event = mainEvent()) {
+  if (!mainEventTitle) return;
+  currentMainEvent = event || null;
+  const title = event?.title || event?.name || 'Evento';
+  const limit = Number(event?.teamLimit || 16);
+  const min = Number(event?.minimumTeams || 4);
+  mainEventTitle.textContent = `🏟 ${title}`;
+  if (mainEventDescription) mainEventDescription.textContent = event?.description || 'Configure a descrição do evento para orientar capitães e jogadores.';
+  if (eventModeValue) eventModeValue.textContent = formatEventMode(event);
+  if (eventFormatValue) eventFormatValue.textContent = event?.matchFormat || 'MD3';
+  if (eventStartValue) eventStartValue.textContent = eventStartText(event);
+  if (eventMinimumTeamsMeta) eventMinimumTeamsMeta.textContent = `Mínimo de ${min} time${min === 1 ? '' : 's'} para confirmar o evento.`;
+  if (editMainEventBtn) {
+    editMainEventBtn.hidden = !isAdminUser();
+    editMainEventBtn.dataset.eventId = event?.id || '';
+  }
+  if (homeJoinEventBtn) homeJoinEventBtn.disabled = !event || event.status === 'closed' || event.status === 'finished';
+}
+
+function renderEventsShowcase() {
+  if (!eventsShowcaseList) return;
+  if (!currentEvents.length) {
+    eventsShowcaseList.innerHTML = '<div class="chat-empty-state"><strong>Nenhum evento criado ainda.</strong><p>O administrador poderá criar novos eventos por aqui.</p></div>';
+    return;
+  }
+
+  eventsShowcaseList.innerHTML = currentEvents.map((event) => {
+    const active = (event.id === (mainEvent()?.id || currentEventId));
+    const registeredCount = Number(event.registeredCount || event.registeredTeams?.length || 0);
+    const limit = Number(event.teamLimit || 16);
+    return `
+      <button class="event-showcase-card ${active ? 'is-active' : ''}" type="button" data-event-card-id="${escapeHtml(event.id)}">
+        <strong>${escapeHtml(event.title || event.name || 'Evento')}</strong>
+        <small>${escapeHtml(formatEventMode(event))} • ${escapeHtml(event.matchFormat || 'MD3')}</small>
+        <span>${registeredCount}/${limit} inscritos • ${escapeHtml(eventStartText(event))}</span>
+      </button>
+    `;
+  }).join('');
+}
+
+function renderScrimDirectory() {
+  if (!scrimDirectoryGrid) return;
+  const directoryTeams = teams.filter((team) => team.ownerUserId).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  if (!directoryTeams.length) {
+    scrimDirectoryGrid.innerHTML = '<div class="chat-empty-state"><strong>Nenhum responsável encontrado.</strong><p>Os times cadastrados com dono/capitão aparecem aqui automaticamente.</p></div>';
+    return;
+  }
+
+  const canChatWithSomeone = directoryTeams.some((team) => {
+    const owner = usersLookup.find((user) => user.id === team.ownerUserId);
+    return owner && owner.id !== currentUser?.id;
+  });
+
+  scrimDirectoryGrid.innerHTML = directoryTeams.map((team) => {
+    const owner = usersLookup.find((user) => user.id === team.ownerUserId);
+    const captain = (team.players || [])[0] || 'Capitão não definido';
+    const ownerName = owner ? publicUserName(owner) : captain;
+    const isOwnTeam = owner && owner.id === currentUser?.id;
+    const note = !owner
+      ? 'Responsável ainda sem conta vinculada no site.'
+      : isOwnTeam
+        ? 'Esse é um dos seus times.'
+        : 'Chat direto disponível.';
+    return `
+      <article class="scrim-directory-card" data-team-id="${escapeHtml(team.id)}">
+        <div class="scrim-directory-head">
+          <span class="scrim-directory-logo">${teamLogoHtml(team)}</span>
+          <div>
+            <strong>${escapeHtml(team.name || 'Time')}</strong>
+            <small>${escapeHtml(team.tag || 'SEM TAG')} • ${escapeHtml(ownerName)}</small>
+          </div>
+        </div>
+        <div class="scrim-directory-actions">
+          ${owner ? `<button class="mini-btn" type="button" data-user-id="${escapeHtml(owner.id)}">Perfil público</button>` : ''}
+          ${owner && owner.id !== currentUser?.id ? `<button class="mini-btn primary-mini" type="button" data-open-screen-user="${escapeHtml(owner.id)}">Abrir chat</button>` : `<span class="scrim-directory-note">${escapeHtml(note)}</span>`}
+        </div>
+      </article>
+    `;
+  }).join('');
+
+  if (!canChatWithSomeone) {
+    scrimDirectoryGrid.insertAdjacentHTML('afterbegin', '<div class="chat-empty-state scrim-help-banner"><strong>Nenhum outro capitão com conta vinculada ainda.</strong><p>Quando outro responsável entrar no site e criar o próprio perfil, o botão de chat direto aparece aqui.</p></div>');
+  }
+}
+
 function renderTeams() {
   if (teamCounter) teamCounter.textContent = `${teams.length} ${teams.length === 1 ? 'time cadastrado' : 'times cadastrados'}`;
 
@@ -508,8 +641,10 @@ function renderTeams() {
           <p>${players.map(escapeHtml).join(', ') || 'Sem titulares.'}</p>
         </div>
         <div class="team-actions">
-          <button class="mini-btn" type="button" data-action="edit" data-id="${escapeHtml(team.id)}">Editar</button>
-          <button class="mini-btn danger" type="button" data-action="delete" data-id="${escapeHtml(team.id)}">Excluir</button>
+          ${isAdminUser() ? `
+            <button class="mini-btn" type="button" data-action="edit" data-id="${escapeHtml(team.id)}">Editar</button>
+            <button class="mini-btn danger" type="button" data-action="delete" data-id="${escapeHtml(team.id)}">Excluir</button>
+          ` : '<span class="team-actions-lock">Somente administrador</span>'}
         </div>
       </article>
     `;
@@ -518,7 +653,10 @@ function renderTeams() {
 
 
 function mainEvent() {
-  return currentEvents.find((event) => event.id === 'coliseu-void-arena') || currentEvents[0] || null;
+  return currentEvents.find((event) => event.id === currentEventId)
+    || currentEvents.find((event) => event.id === 'coliseu-void-arena')
+    || currentEvents[0]
+    || null;
 }
 
 function renderEventRegisteredTeams(event = mainEvent()) {
@@ -537,7 +675,7 @@ function renderEventRegisteredTeams(event = mainEvent()) {
     eventRegisteredTeams.innerHTML = `
       <div class="chat-empty-state">
         <strong>Nenhum time inscrito ainda.</strong>
-        <p>Quando um capitão inscrever um time no Coliseu, ele aparece aqui automaticamente.</p>
+        <p>Quando um capitão inscrever um time nesse evento, ele aparece aqui automaticamente.</p>
       </div>
     `;
     return;
@@ -545,7 +683,7 @@ function renderEventRegisteredTeams(event = mainEvent()) {
 
   eventRegisteredTeams.innerHTML = registeredTeams.map((team) => `
     <button class="registered-team registered-team-btn" type="button" data-team-id="${escapeHtml(team.id)}">
-      <span>${escapeHtml((team.tag || team.name || '?').slice(0, 2).toUpperCase())}</span>
+      <span class="registered-team-media">${teamLogoHtml(team)}</span>
       <strong>${escapeHtml(team.name || 'Time')}</strong>
     </button>
   `).join('');
@@ -591,13 +729,17 @@ function renderPublicTeamsGrid() {
 
 function renderPlayerHomeData() {
   const event = mainEvent();
+  renderMainEventSummary(event);
   renderEventRegisteredTeams(event);
+  renderEventsShowcase();
   renderPublicTeamsGrid();
+  renderScrimDirectory();
 }
 
 async function loadEvents() {
   const data = await apiJson('/api/events');
   currentEvents = data.events || [];
+  if (!currentEvents.some((event) => event.id === currentEventId) && currentEvents[0]) currentEventId = currentEvents[0].id;
   currentMainEvent = mainEvent();
   renderPlayerHomeData();
   return currentEvents;
@@ -613,7 +755,7 @@ function openEventRegisterModal() {
     eventRegisterChoices.innerHTML = `
       <div class="chat-empty-state">
         <strong>Você ainda não tem time vinculado.</strong>
-        <p>Cadastre seu time primeiro. Depois volte aqui para inscrever no Coliseu.</p>
+        <p>Cadastre seu time primeiro. Depois volte aqui para concluir a inscrição no evento selecionado.</p>
       </div>
       <button class="btn primary" type="button" data-event-create-team>Cadastrar meu time</button>
     `;
@@ -625,7 +767,7 @@ function openEventRegisterModal() {
           <span class="event-register-logo">${teamLogoHtml(team)}</span>
           <span>
             <strong>${escapeHtml(team.name)}</strong>
-            <small>${already ? 'Já inscrito no Coliseu' : `${escapeHtml(team.tag || 'SEM TAG')} • pronto para inscrição`}</small>
+            <small>${already ? 'Já inscrito nesse evento' : `${escapeHtml(team.tag || 'SEM TAG')} • pronto para inscrição`}</small>
           </span>
         </button>
       `;
@@ -663,11 +805,84 @@ async function registerTeamInMainEvent(teamId) {
   renderPlayerHomeData();
 
   if (eventRegisterStatus) {
-    eventRegisterStatus.textContent = data.alreadyRegistered ? 'Esse time já estava inscrito.' : 'Time inscrito no Coliseu com sucesso.';
+    eventRegisterStatus.textContent = data.alreadyRegistered ? 'Esse time já estava inscrito.' : 'Time inscrito no evento com sucesso.';
     eventRegisterStatus.className = 'auth-message success';
   }
 
   setTimeout(closeEventRegisterModal, 550);
+}
+
+
+function openEventEditorModal(eventData = null) {
+  if (!eventEditorModal || !eventEditorForm || !isAdminUser()) return;
+  const form = eventEditorForm;
+  form.reset();
+  form.elements.eventId.value = eventData?.id || '';
+  form.elements.title.value = eventData?.title || eventData?.name || '';
+  form.elements.status.value = eventData?.status || 'open';
+  form.elements.mode.value = formatEventMode(eventData) || 'Mata-mata';
+  form.elements.matchFormat.value = eventData?.matchFormat || 'MD3';
+  form.elements.teamLimit.value = String(eventData?.teamLimit || 16);
+  form.elements.minimumTeams.value = String(eventData?.minimumTeams || 4);
+  form.elements.startAt.value = eventData?.startAt || '';
+  form.elements.structure.value = eventData?.structure || '';
+  form.elements.description.value = eventData?.description || '';
+  initCustomSelects(form);
+  refreshCustomSelects(form);
+  if (eventEditorTitle) eventEditorTitle.textContent = eventData ? 'Editar evento' : 'Novo evento';
+  if (eventEditorMessage) {
+    eventEditorMessage.textContent = '';
+    eventEditorMessage.className = 'auth-message';
+  }
+  eventEditorModal.hidden = false;
+}
+
+function closeEventEditorModal() {
+  if (eventEditorModal) eventEditorModal.hidden = true;
+}
+
+async function saveEventEditor(event) {
+  event.preventDefault();
+  if (!eventEditorForm) return;
+  const form = new FormData(eventEditorForm);
+  const eventId = String(form.get('eventId') || '').trim();
+  const payload = {
+    title: String(form.get('title') || '').trim(),
+    status: String(form.get('status') || 'open').trim(),
+    mode: String(form.get('mode') || 'Mata-mata').trim(),
+    matchFormat: String(form.get('matchFormat') || 'MD3').trim(),
+    teamLimit: Number(form.get('teamLimit') || 16),
+    minimumTeams: Number(form.get('minimumTeams') || 4),
+    startAt: String(form.get('startAt') || '').trim(),
+    structure: String(form.get('structure') || '').trim(),
+    description: String(form.get('description') || '').trim()
+  };
+
+  try {
+    if (eventEditorMessage) {
+      eventEditorMessage.textContent = 'Salvando evento...';
+      eventEditorMessage.className = 'auth-message';
+    }
+    const url = eventId ? `/api/events/${encodeURIComponent(eventId)}` : '/api/events';
+    const method = eventId ? 'PUT' : 'POST';
+    const data = await apiJson(url, { method, body: JSON.stringify(payload) });
+    const savedEvent = data.event;
+    const index = currentEvents.findIndex((item) => item.id === savedEvent.id);
+    if (index >= 0) currentEvents[index] = savedEvent;
+    else currentEvents.push(savedEvent);
+    currentEventId = savedEvent.id;
+    renderPlayerHomeData();
+    if (eventEditorMessage) {
+      eventEditorMessage.textContent = 'Evento salvo com sucesso.';
+      eventEditorMessage.className = 'auth-message success';
+    }
+    setTimeout(closeEventEditorModal, 500);
+  } catch (error) {
+    if (eventEditorMessage) {
+      eventEditorMessage.textContent = error.message;
+      eventEditorMessage.className = 'auth-message error';
+    }
+  }
 }
 
 function openRulesModal() {
@@ -2186,36 +2401,20 @@ async function sendStatsChatMessage(event) {
 }
 
 function fillTeamChatSelects() {
-  if (!teamChatCreateForm) return;
-  const select = teamChatCreateForm.elements.participantUserId;
-  if (!select) return;
-
-  const contacts = usersLookup
-    .filter((user) => user.id && user.id !== currentUser?.id)
-    .sort((a, b) => publicUserName(a).localeCompare(publicUserName(b)));
-
-  const options = ['<option value="">Selecionar jogador/capitão</option>'];
-  contacts.forEach((user) => {
-    const linkedTeams = getTeamsWhereUserPlays(user);
-    const suffix = linkedTeams.length ? ` • ${linkedTeams.map((team) => team.tag || team.name).slice(0, 2).join(', ')}` : '';
-    options.push(`<option value="${escapeHtml(user.id)}">${escapeHtml(publicUserName(user))}${escapeHtml(suffix)}</option>`);
-  });
-
-  select.innerHTML = options.join('');
-  rebuildCustomSelect(select);
+  renderScrimDirectory();
 }
 
 function renderTeamChatList() {
   if (!teamChatList) return;
 
   if (!teamChatConversations.length) {
-    teamChatList.innerHTML = '<div class="chat-empty-state">Nenhuma screen aberta ainda.</div>';
+    teamChatList.innerHTML = '<div class="chat-empty-state"><strong>Nenhuma conversa aberta ainda.</strong><p>Abra um chat pelo catálogo de scrim acima para ele aparecer aqui.</p></div>';
     return;
   }
 
   teamChatList.innerHTML = teamChatConversations.map((conversation) => `
     <button class="team-chat-item ${conversation.id === activeTeamChatId ? 'is-active' : ''}" type="button" data-team-chat-id="${escapeHtml(conversation.id)}">
-      <strong>${escapeHtml(conversation.title || 'Screen')}</strong>
+      <strong>${escapeHtml(conversation.title || 'Chat direto')}</strong>
       <small>${conversation.lastMessageAt ? `Última mensagem ${escapeHtml(formatChatTime(conversation.lastMessageAt))}` : 'Conversa criada'}</small>
     </button>
   `).join('');
@@ -2235,7 +2434,7 @@ function setActiveTeamChat(conversationId) {
 
   renderTeamChatList();
   if (conversation) loadTeamChatMessages();
-  else renderChatMessages(teamChatMessages, [], 'Abra ou selecione uma screen.');
+  else renderChatMessages(teamChatMessages, [], 'Abra ou selecione uma conversa.');
 }
 
 async function loadTeamChats() {
@@ -2269,7 +2468,7 @@ async function loadTeamChatMessages() {
 
   try {
     const data = await apiJson(`/api/team-chats/${encodeURIComponent(activeTeamChatId)}/messages?limit=80`);
-    renderChatMessages(teamChatMessages, data.messages || [], 'Nenhuma mensagem nessa screen ainda.');
+    renderChatMessages(teamChatMessages, data.messages || [], 'Nenhuma mensagem nessa conversa ainda.');
   } catch (error) {
     renderChatMessages(teamChatMessages, [], error.message);
   }
@@ -2278,6 +2477,7 @@ async function loadTeamChatMessages() {
 function openTeamChatModal() {
   if (!teamChatModal) return;
   fillTeamChatSelects();
+  renderScrimDirectory();
   activeTeamChatId = activeTeamChatId || '';
   teamChatModal.hidden = false;
   setupMentionInput(teamChatForm);
@@ -2299,10 +2499,11 @@ function closeTeamChatModal() {
 async function createTeamChat(event) {
   event.preventDefault();
   const participantUserId = teamChatCreateForm?.elements?.participantUserId?.value || '';
+  if (!participantUserId) return;
 
   try {
     if (teamChatStatus) {
-      teamChatStatus.textContent = 'Abrindo screen...';
+      teamChatStatus.textContent = 'Abrindo chat...';
       teamChatStatus.className = 'auth-message';
     }
 
@@ -2314,7 +2515,7 @@ async function createTeamChat(event) {
     activeTeamChatId = data.conversation?.id || activeTeamChatId;
     await loadTeamChats();
     if (teamChatStatus) {
-      teamChatStatus.textContent = 'Screen pronta.';
+      teamChatStatus.textContent = 'Chat pronto.';
       teamChatStatus.className = 'auth-message success';
     }
   } catch (error) {
@@ -2380,7 +2581,7 @@ function openUserProfile(userId) {
         <div class="profile-hero-info">
           <strong>${escapeHtml(displayName)}</strong>
           <p>${escapeHtml(createdText)}${profile.country ? ` • ${escapeHtml(profile.country)}` : ''}</p>
-          ${user.id !== currentUser?.id ? `<button class="mini-btn" type="button" data-open-screen-user="${escapeHtml(user.id)}">Abrir screen</button>` : ''}
+          ${user.id !== currentUser?.id ? `<button class="mini-btn" type="button" data-open-screen-user="${escapeHtml(user.id)}">Abrir chat</button>` : ''}
         </div>
       </div>
     </section>
@@ -3382,6 +3583,7 @@ async function loadTeamsAndBracket() {
   teams = teamData.teams || [];
   usersLookup = userData.users || [];
   currentEvents = eventData.events || [];
+  if (!currentEvents.some((event) => event.id === currentEventId) && currentEvents[0]) currentEventId = currentEvents[0].id;
   currentMainEvent = mainEvent();
   currentBracketData = normalizeBracketData(teamData.bracket || {});
 
@@ -4171,6 +4373,11 @@ openBracketScreenBtn?.addEventListener('click', showBracketScreen);
 openBracketFromHomeBtn?.addEventListener('click', showBracketScreen);
 backToPlayerHomeBtn?.addEventListener('click', showPlayerHomeScreen);
 homeCreateTeamBtn?.addEventListener('click', () => openTeamModal());
+openCreateEventBtn?.addEventListener('click', () => openEventEditorModal());
+editMainEventBtn?.addEventListener('click', () => {
+  const eventData = currentEvents.find((item) => item.id === editMainEventBtn.dataset.eventId) || mainEvent();
+  openEventEditorModal(eventData);
+});
 homeCreateTeamStepBtn?.addEventListener('click', () => openTeamModal());
 homeJoinEventBtn?.addEventListener('click', openEventRegisterModal);
 homeTeamChatBtn?.addEventListener('click', () => proxyClick(openTeamChatBtn));
@@ -4198,6 +4405,14 @@ eventRegisterChoices?.addEventListener('click', async (event) => {
     }
   }
 });
+
+closeEventEditorBtn?.addEventListener('click', closeEventEditorModal);
+cancelEventEditorBtn?.addEventListener('click', closeEventEditorModal);
+eventEditorModal?.addEventListener('click', (event) => {
+  if (event.target === eventEditorModal) closeEventEditorModal();
+});
+eventEditorForm?.addEventListener('submit', saveEventEditor);
+
 closeRulesBtn?.addEventListener('click', closeRulesModal);
 rulesModal?.addEventListener('click', (event) => {
   if (event.target === rulesModal) closeRulesModal();
@@ -4205,6 +4420,22 @@ rulesModal?.addEventListener('click', (event) => {
 eventRegisteredTeams?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-team-id]');
   if (button) openTeamProfile(button.dataset.teamId);
+});
+eventsShowcaseList?.addEventListener('click', (event) => {
+  const button = event.target.closest('[data-event-card-id]');
+  if (!button) return;
+  setCurrentMainEvent(button.dataset.eventCardId);
+});
+scrimDirectoryGrid?.addEventListener('click', (event) => {
+  const userButton = event.target.closest('[data-user-id]');
+  if (userButton) {
+    openUserProfile(userButton.dataset.userId);
+    return;
+  }
+  const chatButton = event.target.closest('[data-open-screen-user]');
+  if (chatButton) {
+    openScreenWithUser(chatButton.dataset.openScreenUser);
+  }
 });
 publicTeamsGrid?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-team-id]');

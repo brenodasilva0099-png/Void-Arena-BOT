@@ -33,7 +33,7 @@
       </button>
       <button id="openTeamChatBtn" class="side-rail-btn" type="button">
         <span>⚔️</span>
-        <strong>Screens</strong>
+        <strong>Scrim</strong>
       </button>
       <button id="openStatsBtn" class="side-rail-btn" type="button">
         <span>📊</span>
@@ -112,32 +112,40 @@
         </div>
         <div class="player-home-actions">
           <button id="homeCreateTeamBtn" class="btn primary" type="button">Cadastrar meu time</button>
+          <button id="openCreateEventBtn" class="btn ghost admin-only" type="button" hidden>Novo evento</button>
           <button id="openBracketFromHomeBtn" class="btn ghost" type="button">Ver chaveamento</button>
         </div>
       </div>
 
       <div class="player-home-grid">
         <article class="player-home-feature">
-          <span class="event-card-tag">Evento em destaque</span>
-          <h2>🏟 Coliseu Void Arena</h2>
-          <p>
+          <div class="player-home-feature-head">
+            <span class="event-card-tag">Evento em destaque</span>
+            <button id="editMainEventBtn" class="mini-btn admin-only" type="button" hidden>Editar evento</button>
+          </div>
+          <h2 id="mainEventTitle">🏟 Coliseu Void Arena</h2>
+          <p id="mainEventDescription">
             Campeonato principal da comunidade. Inscreva seu time, confira o limite de vagas e envie o comprovante pelo ticket do Discord.
           </p>
 
           <div class="lobby-meta">
-            <span><strong>Modo</strong>Rematch</span>
-            <span><strong>Formato</strong>MD3</span>
-            <span><strong>Estrutura</strong>Grupos + Playoffs</span>
+            <span><strong>Modo</strong><b id="eventModeValue">Mata-mata</b></span>
+            <span><strong>Formato</strong><b id="eventFormatValue">MD3</b></span>
             <span><strong>Vagas</strong><b id="eventVagasLabel">0/16</b></span>
+            <span><strong>Horário</strong><b id="eventStartValue">Em breve</b></span>
           </div>
 
           <div class="event-progress">
             <span id="eventProgressBar" style="width: 0%"></span>
           </div>
 
+          <div class="event-progress event-progress-secondary">
+            <span id="eventMinimumTeamsMeta">Mínimo de 4 times para confirmar o evento.</span>
+          </div>
+
           <div class="lobby-actions">
             <button class="btn primary" type="button" id="homeJoinEventBtn">Inscrever meu time</button>
-            <button class="btn ghost" type="button" id="homeTeamChatBtn">Screens</button>
+            <button class="btn ghost" type="button" id="homeTeamChatBtn">Scrim</button>
             <button class="btn ghost" type="button" id="homeRulesBtn">Regras</button>
           </div>
         </article>
@@ -149,6 +157,19 @@
           </div>
         </aside>
       </div>
+
+      <section class="events-showcase-panel" aria-labelledby="eventsShowcaseTitle">
+        <div class="player-section-head">
+          <div>
+            <p class="eyebrow">Campeonatos criados</p>
+            <h2 id="eventsShowcaseTitle">Eventos disponíveis</h2>
+            <span>Selecione um evento para visualizar vagas, horário e inscritos.</span>
+          </div>
+        </div>
+        <div id="eventsShowcaseList" class="events-showcase-list">
+          <div class="chat-empty-state">Carregando eventos...</div>
+        </div>
+      </section>
 
       <section class="public-teams-panel" aria-labelledby="publicTeamsTitle">
         <div class="player-section-head">
@@ -414,21 +435,20 @@
     <div class="chat-modal team-chat-modal" role="dialog" aria-modal="true" aria-labelledby="teamChatTitle">
       <div class="modal-header">
         <div>
-          <p class="eyebrow">Directs do site</p>
-          <h2 id="teamChatTitle">Screens</h2>
+          <p class="eyebrow">Contato entre times</p>
+          <h2 id="teamChatTitle">Scrim</h2>
         </div>
         <button id="closeTeamChatBtn" class="icon-btn" type="button" aria-label="Fechar">×</button>
       </div>
 
-      <section class="team-chat-create-box">
+      <section class="team-chat-create-box scrim-directory-shell">
         <div>
-          <strong>Nova screen</strong>
-          <small>Escolha um jogador ou capitão cadastrado para abrir uma conversa direta, tipo direct.</small>
+          <strong>Catálogo de scrim</strong>
+          <small>Veja os times cadastrados, abra o perfil do responsável e inicie um chat direto com o capitão/dono do time.</small>
         </div>
-        <form id="teamChatCreateForm" class="team-chat-create-form screen-create-form">
-          <select name="participantUserId" class="team-chat-select" data-custom-select aria-label="Pessoa para conversar"></select>
-          <button class="btn primary" type="submit">Abrir screen</button>
-        </form>
+        <div id="scrimDirectoryGrid" class="scrim-directory-grid">
+          <div class="chat-empty-state">Carregando responsáveis dos times...</div>
+        </div>
       </section>
 
       <div class="team-chat-layout">
@@ -443,14 +463,14 @@
           <div class="team-chat-room-head">
             <div>
               <p class="eyebrow">Conversa atual</p>
-              <h3 id="activeTeamChatTitle">Selecione uma screen</h3>
+              <h3 id="activeTeamChatTitle">Selecione uma conversa</h3>
             </div>
           </div>
           <div id="teamChatMessages" class="chat-message-list compact-list">
-            <div class="chat-empty-state">Abra ou selecione uma screen.</div>
+            <div class="chat-empty-state">Abra ou selecione uma conversa.</div>
           </div>
           <form id="teamChatForm" class="chat-compose-form">
-            <textarea name="content" rows="1" maxlength="2000" placeholder="Enviar mensagem na screen... Use @ para marcar membros/cargos." autocomplete="off" disabled></textarea>
+            <textarea name="content" rows="1" maxlength="2000" placeholder="Enviar mensagem no chat... Use @ para marcar membros/cargos." autocomplete="off" disabled></textarea>
             <button class="btn ghost mention-btn" type="button" data-mention-button disabled>Marcar @</button>
             <button class="btn primary" type="submit" disabled>Enviar</button>
           </form>
@@ -1097,7 +1117,85 @@
   </div>
 
 
-  <div id="bracketEditorModal" class="modal-backdrop" hidden>
+  
+  <div id="eventEditorModal" class="modal-backdrop" hidden>
+    <div class="team-modal event-editor-modal" role="dialog" aria-modal="true" aria-labelledby="eventEditorTitle">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Gestão de eventos</p>
+          <h2 id="eventEditorTitle">Novo evento</h2>
+        </div>
+        <button id="closeEventEditorBtn" class="icon-btn" type="button" aria-label="Fechar">×</button>
+      </div>
+      <form id="eventEditorForm" class="event-editor-form">
+        <input type="hidden" name="eventId" />
+        <div class="form-grid two-columns compact-grid">
+          <label>
+            Nome do evento
+            <input name="title" type="text" maxlength="80" placeholder="Ex.: Copa Void Arena" required />
+          </label>
+          <label>
+            Status
+            <select name="status" data-custom-select>
+              <option value="open">Inscrições abertas</option>
+              <option value="closed">Inscrições fechadas</option>
+              <option value="running">Em andamento</option>
+              <option value="finished">Encerrado</option>
+            </select>
+          </label>
+          <label>
+            Modo
+            <select name="mode" data-custom-select>
+              <option value="Mata-mata">Mata-mata</option>
+              <option value="Fase de grupos">Fase de grupos</option>
+              <option value="Grupos + Playoffs">Grupos + Playoffs</option>
+            </select>
+          </label>
+          <label>
+            Formato
+            <select name="matchFormat" data-custom-select>
+              <option value="MD1">MD1</option>
+              <option value="MD2">MD2</option>
+              <option value="MD3">MD3</option>
+              <option value="MD5">MD5</option>
+            </select>
+          </label>
+          <label>
+            Vagas
+            <select name="teamLimit" data-custom-select>
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="16">16</option>
+              <option value="32">32</option>
+            </select>
+          </label>
+          <label>
+            Mínimo de times
+            <input name="minimumTeams" type="number" min="2" max="32" value="4" />
+          </label>
+          <label>
+            Horário / início
+            <input name="startAt" type="text" maxlength="40" placeholder="Ex.: 22/06 às 20:00" />
+          </label>
+          <label>
+            Resumo interno
+            <input name="structure" type="text" maxlength="60" placeholder="Ex.: Chaveamento principal" />
+          </label>
+        </div>
+        <label>
+          Descrição
+          <textarea name="description" rows="4" maxlength="260" placeholder="Descreva regras rápidas, observações e como participar."></textarea>
+        </label>
+        <p id="eventEditorMessage" class="auth-message" role="status"></p>
+        <div class="modal-actions">
+          <button id="cancelEventEditorBtn" class="btn ghost" type="button">Cancelar</button>
+          <button class="btn primary" type="submit">Salvar evento</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<div id="bracketEditorModal" class="modal-backdrop" hidden>
     <div class="team-modal bracket-editor-modal" role="dialog" aria-modal="true" aria-labelledby="bracketEditorTitle">
       <div class="modal-header">
         <div>

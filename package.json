@@ -1,6 +1,6 @@
 {
   "name": "abyss-tourment-game",
-  "version": "4.4",
+  "version": "4.6",
   "description": "Sistema separado do Abyss para torneios/campeonatos/copa do jogo Rematch.",
   "main": "bot/index.js",
   "scripts": {

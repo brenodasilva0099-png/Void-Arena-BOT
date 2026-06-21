@@ -17,6 +17,7 @@ const {
   writeBracket,
   readDatabaseStatus,
   readEvents,
+  saveTournamentEvent,
   registerTeamInEvent,
   readChatMessages,
   saveChatMessage,
@@ -139,6 +140,27 @@ function normalizeUserProfile(raw = {}) {
   };
 }
 
+const ADMIN_EMAILS = String(process.env.ADMIN_EMAILS || 'brenodasilva0099@gmail.com').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean);
+const ADMIN_DISCORD_IDS = String(process.env.ADMIN_DISCORD_IDS || '1235713276277559326').split(',').map((item) => item.trim()).filter(Boolean);
+const ADMIN_USER_IDS = String(process.env.ADMIN_USER_IDS || '').split(',').map((item) => item.trim()).filter(Boolean);
+
+function isAdminUser(user) {
+  if (!user) return false;
+  const email = String(user.email || '').trim().toLowerCase();
+  const discordId = String(user.discordId || '').trim();
+  const userId = String(user.id || '').trim();
+  return ADMIN_EMAILS.includes(email) || ADMIN_DISCORD_IDS.includes(discordId) || ADMIN_USER_IDS.includes(userId);
+}
+
+async function requireAdmin(req, res, next) {
+  const user = await findUserById(req.session.userId);
+  if (!user || !isAdminUser(user)) {
+    return res.status(403).json({ success: false, message: 'Apenas o administrador pode usar essa função.' });
+  }
+  req.adminUser = user;
+  return next();
+}
+
 function safeUser(user) {
   if (!user) return null;
 
@@ -149,6 +171,7 @@ function safeUser(user) {
     avatar: user.avatar || null,
     provider: user.provider || 'email',
     discordId: user.discordId || null,
+    isAdmin: isAdminUser(user),
     socials: normalizeUserSocials(user.socials || {}),
     profile: normalizeUserProfile(user.profile || {}),
     createdAt: user.createdAt,
@@ -283,7 +306,7 @@ function createServer({ client }) {
       success: true,
       service: 'Void Arena / Abyss Tourment Game',
       status: 'ok',
-      version: '4.4_eventos_screens_persistente',
+      version: '4.6_ui_fixes_scrim_selects',
       uptime: process.uptime(),
       data: db
     });
@@ -641,6 +664,14 @@ function createServer({ client }) {
     return userIds.some((id) => teamValues.includes(id));
   }
 
+
+  async function userCanManageTeamRecord(userId, team = {}) {
+    const user = await findUserById(userId);
+    if (!user) return false;
+    if (isAdminUser(user)) return true;
+    return String(team.ownerUserId || '') === String(userId || '');
+  }
+
   function safeTournamentEvent(event = {}, teams = []) {
     const teamById = new Map(teams.map((team) => [team.id, sanitizeTeam(team)]));
     const registrations = Array.isArray(event.registrations) ? event.registrations : [];
@@ -659,6 +690,8 @@ function createServer({ client }) {
       matchFormat: event.matchFormat || 'MD3',
       structure: event.structure || 'Grupos + Playoffs',
       teamLimit: Number(event.teamLimit || 16),
+      minimumTeams: Number(event.minimumTeams || 4),
+      startAt: event.startAt || '',
       status: event.status || 'open',
       description: event.description || '',
       registrations: registeredTeams,
@@ -1608,9 +1641,56 @@ function createServer({ client }) {
     });
   });
 
+
+  function normalizeEventPayload(body = {}, existing = {}) {
+    const title = String(body.title || body.name || existing.title || existing.name || 'Novo evento').trim().slice(0, 80);
+    const allowedStatuses = new Set(['open', 'closed', 'running', 'finished']);
+    const teamLimit = [4, 8, 16, 32].includes(Number(body.teamLimit)) ? Number(body.teamLimit) : Number(existing.teamLimit || 16) || 16;
+    const minimumTeams = Math.max(2, Math.min(teamLimit, Number(body.minimumTeams || existing.minimumTeams || 4) || 4));
+    return {
+      id: String(body.id || existing.id || '').trim() || undefined,
+      name: title,
+      title,
+      mode: String(body.mode || existing.mode || 'Mata-mata').trim().slice(0, 60),
+      matchFormat: String(body.matchFormat || existing.matchFormat || 'MD3').trim().slice(0, 12),
+      structure: String(body.structure || existing.structure || '').trim().slice(0, 60),
+      teamLimit,
+      minimumTeams,
+      startAt: String(body.startAt || existing.startAt || '').trim().slice(0, 40),
+      status: allowedStatuses.has(String(body.status || existing.status || 'open')) ? String(body.status || existing.status || 'open') : 'open',
+      description: String(body.description || existing.description || '').trim().slice(0, 260),
+      registrations: Array.isArray(existing.registrations) ? existing.registrations : []
+    };
+  }
+
   app.get('/api/events', requireAuth, async (_req, res) => {
     const [events, teams] = await Promise.all([readEvents(), readTeams()]);
     return res.json({ success: true, events: events.map((event) => safeTournamentEvent(event, teams)) });
+  });
+
+  app.post('/api/events', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const payload = normalizeEventPayload(req.body || {});
+      const event = await saveTournamentEvent(payload);
+      const teams = await readTeams();
+      return res.status(201).json({ success: true, event: safeTournamentEvent(event, teams) });
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  });
+
+  app.put('/api/events/:eventId', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const events = await readEvents();
+      const existing = events.find((item) => item.id === req.params.eventId);
+      if (!existing) return res.status(404).json({ success: false, message: 'Evento não encontrado.' });
+      const payload = normalizeEventPayload({ ...req.body, id: existing.id }, existing);
+      const event = await saveTournamentEvent({ ...existing, ...payload });
+      const teams = await readTeams();
+      return res.json({ success: true, event: safeTournamentEvent(event, teams) });
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
   });
 
   app.post('/api/events/:eventId/register', requireAuth, async (req, res) => {
@@ -1646,7 +1726,7 @@ function createServer({ client }) {
     return res.json({ success: true, settings });
   });
 
-  app.put('/api/tournament/settings', requireAuth, async (req, res) => {
+  app.put('/api/tournament/settings', requireAuth, requireAdmin, async (req, res) => {
     const allowedFormats = new Set(['MD1', 'MD2', 'MD3', 'MD5']);
     const allowedStructures = new Set(['single_elimination', 'groups', 'groups_playoffs']);
 
@@ -1705,6 +1785,11 @@ function createServer({ client }) {
         return res.status(404).json({ success: false, message: 'Time não encontrado.' });
       }
 
+      const canManage = await userCanManageTeamRecord(req.session.userId, existing);
+      if (!canManage) {
+        return res.status(403).json({ success: false, message: 'Você não tem permissão para editar esse time.' });
+      }
+
       const payload = normalizeTeamPayload(req.body, existing);
       const team = await saveTeam({
         ...existing,
@@ -1719,6 +1804,16 @@ function createServer({ client }) {
   });
 
   app.delete('/api/teams/:teamId', requireAuth, async (req, res) => {
+    const teamsBeforeDelete = await readTeams();
+    const targetTeam = teamsBeforeDelete.find((team) => team.id === req.params.teamId);
+    if (!targetTeam) {
+      return res.status(404).json({ success: false, message: 'Time não encontrado.' });
+    }
+    const canManage = await userCanManageTeamRecord(req.session.userId, targetTeam);
+    if (!canManage) {
+      return res.status(403).json({ success: false, message: 'Você não tem permissão para excluir esse time.' });
+    }
+
     const removed = await deleteTeam(req.params.teamId);
 
     if (!removed) {
@@ -1746,7 +1841,7 @@ function createServer({ client }) {
     return res.json({ success: true });
   });
 
-  app.post('/api/bracket/generate', requireAuth, async (_req, res) => {
+  app.post('/api/bracket/generate', requireAuth, requireAdmin, async (_req, res) => {
     const teams = await readTeams();
     const settings = await readTournamentSettings();
 
@@ -1778,13 +1873,13 @@ function createServer({ client }) {
   });
 
 
-  app.post('/api/bracket/match-channels', requireAuth, async (_req, res) => {
+  app.post('/api/bracket/match-channels', requireAuth, requireAdmin, async (_req, res) => {
     const [bracket, settings] = await Promise.all([readBracket(), readTournamentSettings()]);
     const matchChannels = await createDiscordChannelsForBracket(bracket, settings);
     return res.json({ success: true, matchChannels });
   });
 
-  app.put('/api/bracket', requireAuth, async (req, res) => {
+  app.put('/api/bracket', requireAuth, requireAdmin, async (req, res) => {
     const teams = await readTeams();
     const existing = await readBracket();
     const normalized = normalizeBracketIds(req.body || {}, teams);
