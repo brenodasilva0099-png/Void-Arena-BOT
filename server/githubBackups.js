@@ -93,6 +93,39 @@ async function saveBackupToGitHub(storage, options = {}) {
   const backup = await storage.exportDatabaseBackup();
   const now = new Date();
 
+  if (!options.force) {
+    const nextTeams = Number(backup.summary?.teams || 0);
+    const nextUsers = Number(backup.summary?.users || 0);
+
+    const latest = await fetchLatestBackupFromGitHub().catch(() => null);
+    const latestTeams = Number(latest?.summary?.teams || 0);
+    const latestUsers = Number(latest?.summary?.users || 0);
+
+    if (nextTeams === 0 && latestTeams > 0) {
+      return {
+        success: true,
+        skipped: true,
+        reason: 'empty_backup_blocked',
+        message: 'Backup atual tem 0 times e o latest do GitHub tem times. Não vou sobrescrever backup bom com banco vazio.',
+        attemptedSummary: backup.summary || {},
+        latestSummary: latest?.summary || {},
+        savedAt: now.toISOString()
+      };
+    }
+
+    if (nextTeams === 0 && nextUsers <= latestUsers && latestTeams > 0) {
+      return {
+        success: true,
+        skipped: true,
+        reason: 'unsafe_backup_blocked',
+        message: 'Backup atual parece incompleto. Latest preservado.',
+        attemptedSummary: backup.summary || {},
+        latestSummary: latest?.summary || {},
+        savedAt: now.toISOString()
+      };
+    }
+  }
+
   const backupPath = `backups/${monthFolder(now)}/${backupFileName(config.prefix, now)}`;
   const latestPath = `latest/${config.prefix}-backup-latest.json`;
   const manifestPath = `latest/manifest.json`;
@@ -183,12 +216,30 @@ async function autoRestoreLatestBackup(storage) {
   }
 
   const status = await storage.readDatabaseStatus();
+  const latest = await fetchLatestBackupFromGitHub().catch(() => null);
 
-  if (!isEffectivelyEmpty(status)) {
-    return { success: true, skipped: true, reason: 'database_not_empty', status };
+  const currentTeams = Number(status.teams || 0);
+  const currentUsers = Number(status.users || 0);
+  const latestTeams = Number(latest?.summary?.teams || 0);
+
+  if (isEffectivelyEmpty(status)) {
+    return restoreLatestBackupFromGitHub(storage);
   }
 
-  return restoreLatestBackupFromGitHub(storage);
+  if (currentTeams === 0 && latestTeams > 0) {
+    return restoreLatestBackupFromGitHub(storage);
+  }
+
+  return {
+    success: true,
+    skipped: true,
+    reason: 'database_not_empty',
+    status,
+    latestSummary: latest?.summary || null,
+    currentUsers,
+    currentTeams,
+    latestTeams
+  };
 }
 
 module.exports = {
