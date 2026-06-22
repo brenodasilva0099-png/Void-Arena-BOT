@@ -242,6 +242,21 @@ function normalizeTrainingVideo(raw = {}) {
   };
 }
 
+function normalizeTrainingComment(raw = {}) {
+  const now = new Date().toISOString();
+
+  return {
+    id: String(raw.id || `training_comment_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+    authorId: String(raw.authorId || '').trim(),
+    authorDiscordId: String(raw.authorDiscordId || '').trim(),
+    authorName: String(raw.authorName || 'Equipe Void Arena').trim().slice(0, 100),
+    content: String(raw.content || '').trim().slice(0, 1200),
+    deliveredToDiscord: Boolean(raw.deliveredToDiscord),
+    dmError: String(raw.dmError || '').trim().slice(0, 240),
+    createdAt: raw.createdAt || now
+  };
+}
+
 function normalizeTrainingSubmission(raw = {}) {
   const now = new Date().toISOString();
   const status = ['pending', 'reviewed', 'approved', 'rejected', 'archived'].includes(String(raw.status || '').toLowerCase())
@@ -267,6 +282,9 @@ function normalizeTrainingSubmission(raw = {}) {
     mirrorError: String(raw.mirrorError || '').trim().slice(0, 240),
     status,
     reviewNote: String(raw.reviewNote || '').trim().slice(0, 900),
+    comments: Array.isArray(raw.comments)
+      ? raw.comments.map(normalizeTrainingComment).filter((comment) => comment.content).slice(-80)
+      : [],
     reviewedBy: String(raw.reviewedBy || '').trim(),
     reviewedAt: raw.reviewedAt || null,
     createdAt: raw.createdAt || now,
@@ -1088,6 +1106,47 @@ async function updateTrainingSubmissionStatus(id, updates = {}) {
   });
 }
 
+async function addTrainingSubmissionComment(id, comment = {}) {
+  const safeId = String(id || '').trim();
+  if (!safeId) throw new Error('Envio de treino inválido.');
+
+  const normalizedComment = normalizeTrainingComment({
+    ...comment,
+    id: comment.id || `training_comment_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    createdAt: comment.createdAt || new Date().toISOString()
+  });
+
+  if (!normalizedComment.content) {
+    throw new Error('Escreva um comentário.');
+  }
+
+  return updateDatabase((db) => {
+    db.trainingSubmissions = Array.isArray(db.trainingSubmissions)
+      ? db.trainingSubmissions.map(normalizeTrainingSubmission)
+      : [];
+
+    const index = db.trainingSubmissions.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Envio de treino não encontrado.');
+
+    const current = normalizeTrainingSubmission(db.trainingSubmissions[index]);
+    const comments = Array.isArray(current.comments) ? current.comments : [];
+
+    const next = normalizeTrainingSubmission({
+      ...current,
+      comments: [...comments, normalizedComment].slice(-80),
+      reviewNote: normalizedComment.content,
+      updatedAt: new Date().toISOString()
+    });
+
+    db.trainingSubmissions[index] = next;
+
+    return {
+      submission: next,
+      comment: normalizedComment
+    };
+  });
+}
+
 
 
 function summarizeDatabase(db = {}) {
@@ -1165,6 +1224,7 @@ async function importDatabaseBackup(payload = {}) {
 
 
 module.exports = {
+  addTrainingSubmissionComment,
   updateTrainingSubmissionStatus,
   saveTrainingSubmission,
   readTrainingSubmissions,

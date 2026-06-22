@@ -1,4 +1,5 @@
 const express = require('express');
+const { Readable } = require('node:stream');
 const { ChannelType } = require('discord.js');
 const { extractDiscordMessageAttachments } = require('./discordClient');
 const storage = require('../server/storage');
@@ -51,6 +52,7 @@ const STORAGE_METHODS = new Set([
   'readBracket',
   'writeBracket',
   'updateTrainingSubmissionStatus',
+  'addTrainingSubmissionComment',
   'saveTrainingSubmission',
   'readTrainingSubmissions',
 ]);
@@ -275,6 +277,164 @@ async function importDiscordHistory(client, { discordChannelId, siteChannelId, l
   return { success: true, imported, skipped };
 }
 
+async function findTrainingSubmissionById(submissionId) {
+  const submissions = await storage.readTrainingSubmissions({ limit: 500 });
+  return submissions.find((item) => String(item.id) === String(submissionId)) || null;
+}
+
+function chooseVideoAttachment(message, submission = {}) {
+  const videoId = String(submission.video?.id || submission.originalVideo?.id || '').trim();
+  const videoName = String(submission.video?.name || submission.originalVideo?.name || '').trim();
+
+  const attachments = Array.from(message?.attachments?.values?.() || []);
+
+  return attachments.find((attachment) => String(attachment.id) === videoId)
+    || attachments.find((attachment) => String(attachment.name || '') === videoName)
+    || attachments.find((attachment) => String(attachment.contentType || '').startsWith('video/'))
+    || attachments[0]
+    || null;
+}
+
+async function resolveFreshTrainingVideoSource(client, submission = {}) {
+  const channelId = String(submission.discordChannelId || '').trim();
+  const messageId = String(submission.discordMessageId || '').trim();
+
+  if (channelId && messageId && client?.channels?.fetch) {
+    const channel = await client.channels.fetch(channelId).catch(() => null);
+    const message = await channel?.messages?.fetch?.(messageId).catch(() => null);
+    const attachment = chooseVideoAttachment(message, submission);
+
+    if (attachment?.url) {
+      return {
+        url: attachment.url,
+        name: attachment.name || submission.video?.name || `treino-${submission.id}.mp4`,
+        contentType: attachment.contentType || submission.video?.contentType || 'video/mp4',
+        size: Number(attachment.size || submission.video?.size || 0) || 0
+      };
+    }
+  }
+
+  const video = submission.video || submission.originalVideo || {};
+  const fallbackUrl = video.proxyUrl || video.url || video.attachmentUrl || video.downloadUrl || '';
+
+  if (!fallbackUrl) {
+    throw new Error('URL do vídeo não encontrada.');
+  }
+
+  return {
+    url: fallbackUrl,
+    name: video.name || video.filename || `treino-${submission.id}.mp4`,
+    contentType: video.contentType || 'video/mp4',
+    size: Number(video.size || 0) || 0
+  };
+}
+
+async function streamTrainingVideo(client, req, res) {
+  const submission = await findTrainingSubmissionById(req.params.id);
+
+  if (!submission) {
+    return res.status(404).send('Treino não encontrado.');
+  }
+
+  const source = await resolveFreshTrainingVideoSource(client, submission);
+
+  const headers = {
+    'User-Agent': 'Void-Arena-Bot-Video-Proxy/1.0'
+  };
+
+  if (req.headers.range) {
+    headers.Range = req.headers.range;
+  }
+
+  const upstream = await fetch(source.url, { headers });
+
+  if (!upstream.ok && upstream.status !== 206) {
+    return res.status(upstream.status || 502).send('Não foi possível abrir o vídeo no Discord.');
+  }
+
+  const contentType = upstream.headers.get('content-type') || source.contentType || 'video/mp4';
+  const contentLength = upstream.headers.get('content-length');
+  const contentRange = upstream.headers.get('content-range');
+  const acceptRanges = upstream.headers.get('accept-ranges') || 'bytes';
+  const filename = String(source.name || `treino-${submission.id}.mp4`).replace(/[^\w.\-() ]+/g, '_');
+
+  res.status(upstream.status === 206 ? 206 : 200);
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+  res.setHeader('Accept-Ranges', acceptRanges);
+  res.setHeader('Cache-Control', 'private, max-age=60');
+
+  if (contentLength) res.setHeader('Content-Length', contentLength);
+  if (contentRange) res.setHeader('Content-Range', contentRange);
+
+  if (!upstream.body) return res.end();
+
+  return Readable.fromWeb(upstream.body).pipe(res);
+}
+
+async function sendTrainingCommentDM(client, payload = {}) {
+  const submissionId = String(payload.submissionId || '').trim();
+  const content = String(payload.content || '').trim().slice(0, 1200);
+
+  if (!submissionId) throw new Error('Treino inválido.');
+  if (!content) throw new Error('Escreva um comentário.');
+
+  const submission = await findTrainingSubmissionById(submissionId);
+  if (!submission) throw new Error('Envio de treino não encontrado.');
+
+  const playerDiscordId = String(submission.playerDiscordId || '').trim();
+  if (!playerDiscordId) throw new Error('Esse treino não tem Discord ID do jogador.');
+
+  let deliveredToDiscord = false;
+  let dmError = '';
+
+  const commentPayload = {
+    authorId: String(payload.authorId || '').trim(),
+    authorDiscordId: String(payload.authorDiscordId || '').trim(),
+    authorName: String(payload.authorName || 'Equipe Void Arena').trim(),
+    content,
+    deliveredToDiscord: false,
+    dmError: ''
+  };
+
+  try {
+    if (!client?.users?.fetch) throw new Error('Bot Discord indisponível.');
+
+    const user = await client.users.fetch(playerDiscordId);
+    await user.send({
+      content: [
+        `🎥 **Comentário sobre seu treino enviado**`,
+        ``,
+        `**Analista:** ${commentPayload.authorName}`,
+        `**Treino:** ${submission.type || 'Treino'} • ${submission.position || 'Posição não informada'}`,
+        ``,
+        content,
+        ``,
+        `Void Arena • Sistema de análise de treinos`
+      ].join('\n'),
+      allowedMentions: { parse: [] }
+    });
+
+    deliveredToDiscord = true;
+  } catch (error) {
+    dmError = error.message || 'Não foi possível enviar DM.';
+  }
+
+  const saved = await storage.addTrainingSubmissionComment(submissionId, {
+    ...commentPayload,
+    deliveredToDiscord,
+    dmError
+  });
+
+  return {
+    success: true,
+    deliveredToDiscord,
+    dmError,
+    submission: saved.submission,
+    comment: saved.comment
+  };
+}
+
 function startInternalApi({ client, port = 3002 } = {}) {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
@@ -322,6 +482,29 @@ function startInternalApi({ client, port = 3002 } = {}) {
   });
 
   app.use(requireInternalToken);
+
+
+  app.get('/internal/training-submissions/:id/video', async (req, res) => {
+    try {
+      return await streamTrainingVideo(client, req, res);
+    } catch (error) {
+      console.error('❌ Erro no proxy interno de vídeo:', error);
+      return res.status(502).send(error.message || 'Erro ao carregar vídeo.');
+    }
+  });
+
+  app.post('/internal/training-submissions/:id/comment', async (req, res) => {
+    try {
+      const result = await sendTrainingCommentDM(client, {
+        ...(req.body || {}),
+        submissionId: req.params.id
+      });
+
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
 
   app.get('/internal/health', async (_req, res) => {
     const database = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
