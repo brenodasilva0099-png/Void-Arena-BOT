@@ -277,9 +277,20 @@ async function importDiscordHistory(client, { discordChannelId, siteChannelId, l
   return { success: true, imported, skipped };
 }
 
+
 async function findTrainingSubmissionById(submissionId) {
   const submissions = await storage.readTrainingSubmissions({ limit: 500 });
   return submissions.find((item) => String(item.id) === String(submissionId)) || null;
+}
+
+function isVideoAttachment(attachment) {
+  const contentType = String(attachment?.contentType || attachment?.content_type || '').toLowerCase();
+  const name = String(attachment?.name || attachment?.filename || '').toLowerCase();
+
+  return (
+    contentType.startsWith('video/') ||
+    /\.(mp4|mov|webm|mkv|m4v)$/i.test(name)
+  );
 }
 
 function chooseVideoAttachment(message, submission = {}) {
@@ -290,42 +301,139 @@ function chooseVideoAttachment(message, submission = {}) {
 
   return attachments.find((attachment) => String(attachment.id) === videoId)
     || attachments.find((attachment) => String(attachment.name || '') === videoName)
-    || attachments.find((attachment) => String(attachment.contentType || '').startsWith('video/'))
+    || attachments.find(isVideoAttachment)
     || attachments[0]
     || null;
 }
 
+function messageLooksLikeSubmission(message, submission = {}) {
+  const content = String(message?.content || '').toLowerCase();
+  const playerName = String(submission.playerName || '').toLowerCase();
+  const playerDiscordId = String(submission.playerDiscordId || '').trim();
+  const description = String(submission.description || '').toLowerCase();
+  const submissionId = String(submission.id || '').toLowerCase();
+
+  const embedText = (message?.embeds || [])
+    .map((embed) => [
+      embed.title,
+      embed.description,
+      ...(embed.fields || []).map((field) => `${field.name} ${field.value}`)
+    ].flat().join(' '))
+    .join(' ')
+    .toLowerCase();
+
+  const haystack = `${content} ${embedText}`;
+
+  if (submissionId && haystack.includes(submissionId)) return true;
+  if (playerDiscordId && haystack.includes(playerDiscordId)) return true;
+  if (playerName && haystack.includes(playerName)) return true;
+  if (description && description.length >= 8 && haystack.includes(description.slice(0, 32))) return true;
+
+  return false;
+}
+
+async function fetchMessageVideo(client, channelId, messageId, submission = {}) {
+  if (!channelId || !messageId) return null;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  const message = await channel?.messages?.fetch?.(messageId).catch(() => null);
+
+  if (!message) return null;
+
+  const attachment = chooseVideoAttachment(message, submission);
+
+  if (!attachment?.url) return null;
+
+  return {
+    message,
+    attachment,
+    source: 'saved-message'
+  };
+}
+
+async function scanTrainingHistoryForVideo(client, submission = {}) {
+  const channelId = String(
+    process.env.TRAINING_LOG_CHANNEL_ID ||
+    process.env.TRAINING_CHANNEL_ID ||
+    submission.discordChannelId ||
+    ''
+  ).trim();
+
+  if (!channelId) return null;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.messages?.fetch) return null;
+
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  if (!messages?.size) return null;
+
+  const list = Array.from(messages.values())
+    .filter((message) => Array.from(message.attachments?.values?.() || []).some(isVideoAttachment))
+    .sort((a, b) => Number(b.createdTimestamp || 0) - Number(a.createdTimestamp || 0));
+
+  const directMatch = list.find((message) => messageLooksLikeSubmission(message, submission));
+  const fallback = directMatch || list[0];
+
+  if (!fallback) return null;
+
+  const attachment = chooseVideoAttachment(fallback, submission);
+  if (!attachment?.url) return null;
+
+  return {
+    message: fallback,
+    attachment,
+    source: directMatch ? 'history-match' : 'history-latest-video'
+  };
+}
+
 async function resolveFreshTrainingVideoSource(client, submission = {}) {
-  const channelId = String(submission.discordChannelId || '').trim();
-  const messageId = String(submission.discordMessageId || '').trim();
+  const savedChannelId = String(submission.discordChannelId || submission.video?.discordChannelId || '').trim();
+  const savedMessageId = String(submission.discordMessageId || submission.video?.discordMessageId || '').trim();
 
-  if (channelId && messageId && client?.channels?.fetch) {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
-    const message = await channel?.messages?.fetch?.(messageId).catch(() => null);
-    const attachment = chooseVideoAttachment(message, submission);
+  const saved = await fetchMessageVideo(client, savedChannelId, savedMessageId, submission);
+  if (saved?.attachment?.url) {
+    return {
+      url: saved.attachment.url,
+      proxyUrl: saved.attachment.proxyURL || saved.attachment.proxyUrl || '',
+      name: saved.attachment.name || submission.video?.name || `treino-${submission.id}.mp4`,
+      contentType: saved.attachment.contentType || submission.video?.contentType || 'video/mp4',
+      size: Number(saved.attachment.size || submission.video?.size || 0) || 0,
+      discordChannelId: saved.message.channelId,
+      discordMessageId: saved.message.id,
+      source: saved.source
+    };
+  }
 
-    if (attachment?.url) {
-      return {
-        url: attachment.url,
-        name: attachment.name || submission.video?.name || `treino-${submission.id}.mp4`,
-        contentType: attachment.contentType || submission.video?.contentType || 'video/mp4',
-        size: Number(attachment.size || submission.video?.size || 0) || 0
-      };
-    }
+  const scanned = await scanTrainingHistoryForVideo(client, submission);
+  if (scanned?.attachment?.url) {
+    return {
+      url: scanned.attachment.url,
+      proxyUrl: scanned.attachment.proxyURL || scanned.attachment.proxyUrl || '',
+      name: scanned.attachment.name || submission.video?.name || `treino-${submission.id}.mp4`,
+      contentType: scanned.attachment.contentType || submission.video?.contentType || 'video/mp4',
+      size: Number(scanned.attachment.size || submission.video?.size || 0) || 0,
+      discordChannelId: scanned.message.channelId,
+      discordMessageId: scanned.message.id,
+      source: scanned.source
+    };
   }
 
   const video = submission.video || submission.originalVideo || {};
-  const fallbackUrl = video.proxyUrl || video.url || video.attachmentUrl || video.downloadUrl || '';
+  const fallbackUrl = video.proxyUrl || video.proxyURL || video.url || video.attachmentUrl || video.downloadUrl || '';
 
   if (!fallbackUrl) {
-    throw new Error('URL do vídeo não encontrada.');
+    throw new Error('Não achei o vídeo no histórico do Discord nem no banco.');
   }
 
   return {
     url: fallbackUrl,
+    proxyUrl: video.proxyUrl || video.proxyURL || '',
     name: video.name || video.filename || `treino-${submission.id}.mp4`,
     contentType: video.contentType || 'video/mp4',
-    size: Number(video.size || 0) || 0
+    size: Number(video.size || 0) || 0,
+    discordChannelId: '',
+    discordMessageId: '',
+    source: 'database-fallback'
   };
 }
 
@@ -346,10 +454,11 @@ async function streamTrainingVideo(client, req, res) {
     headers.Range = req.headers.range;
   }
 
-  const upstream = await fetch(source.url, { headers });
+  const videoUrl = source.proxyUrl || source.url;
+  const upstream = await fetch(videoUrl, { headers });
 
   if (!upstream.ok && upstream.status !== 206) {
-    return res.status(upstream.status || 502).send('Não foi possível abrir o vídeo no Discord.');
+    return res.status(upstream.status || 502).send(`Não foi possível abrir o vídeo pelo Discord. Fonte: ${source.source}`);
   }
 
   const contentType = upstream.headers.get('content-type') || source.contentType || 'video/mp4';
@@ -362,7 +471,10 @@ async function streamTrainingVideo(client, req, res) {
   res.setHeader('Content-Type', contentType);
   res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
   res.setHeader('Accept-Ranges', acceptRanges);
-  res.setHeader('Cache-Control', 'private, max-age=60');
+  res.setHeader('Cache-Control', 'private, max-age=30');
+  res.setHeader('X-Training-Video-Source', source.source || 'unknown');
+  res.setHeader('X-Discord-Channel-Id', source.discordChannelId || '');
+  res.setHeader('X-Discord-Message-Id', source.discordMessageId || '');
 
   if (contentLength) res.setHeader('Content-Length', contentLength);
   if (contentRange) res.setHeader('Content-Range', contentRange);
