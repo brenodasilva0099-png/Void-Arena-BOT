@@ -237,12 +237,40 @@ async function handleBackupNow(message) {
   if (Number(status.teams || 0) === 0) {
     const best = await findBestBackup();
 
+    const embed = new EmbedBuilder()
+      .setTitle('⚠️ Banco local incompleto detectado')
+      .setColor(0xf59e0b)
+      .setDescription(
+        'O banco que está rodando agora no Render parece incompleto. ' +
+        'Por segurança, não vou salvar esse estado por cima do backup bom.'
+      )
+      .addFields(
+        {
+          name: 'Banco atual do BOT',
+          value: summarizeStatus(status)
+        },
+        {
+          name: 'Backup seguro no GitHub',
+          value: best
+            ? `${summarizeStatus(best.summary || {})}
+Arquivo: \`${best.path}\`
+Data: ${formatDate(best.savedAt || best.exportedAt)}`
+            : 'Nenhum backup seguro com times foi encontrado.'
+        },
+        {
+          name: 'O que fazer agora?',
+          value: best
+            ? 'Clique em **Restaurar backup seguro**. Depois rode `.db-status` e, se estiver certo, rode `.backup-agora` de novo.'
+            : 'Restaure manualmente um backup antigo ou importe o banco antigo antes de tentar salvar outro backup.'
+        }
+      );
+
     const components = best
       ? [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
               .setCustomId(RESTORE_BEST_BUTTON_ID)
-              .setLabel('Restaurar backup bom')
+              .setLabel('Restaurar backup seguro')
               .setEmoji('✅')
               .setStyle(ButtonStyle.Success)
           )
@@ -250,7 +278,7 @@ async function handleBackupNow(message) {
       : [];
 
     await message.reply({
-      content: '⚠️ O banco atual está com **0 times**. Por segurança, não vou salvar esse backup por cima do backup bom.',
+      embeds: [embed],
       components
     });
     return;
