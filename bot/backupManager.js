@@ -69,8 +69,34 @@ function summarizeStatus(status = {}) {
 }
 
 async function findBestBackup() {
-  const backups = await githubBackups.listBackupsFromGitHub({ limit: 50 });
-  return backups.find((item) => Number(item.summary?.teams || 0) > 0) || null;
+  const candidates = [];
+
+  // Primeiro tenta o latest fixo, porque ele é o backup principal de segurança.
+  try {
+    const latest = await githubBackups.fetchBackupFromGitHubPath('latest/void-arena-backup-latest.json');
+
+    candidates.push({
+      path: 'latest/void-arena-backup-latest.json',
+      savedAt: latest.githubBackup?.savedAt || latest.exportedAt || null,
+      exportedAt: latest.exportedAt || null,
+      reason: latest.githubBackup?.reason || 'latest',
+      summary: latest.summary || {}
+    });
+  } catch (error) {
+    console.warn('⚠️ Latest backup não encontrado ou inválido:', error.message);
+  }
+
+  // Depois tenta o histórico em /backups.
+  try {
+    const backups = await githubBackups.listBackupsFromGitHub({ limit: 50 });
+    candidates.push(...backups);
+  } catch (error) {
+    console.warn('⚠️ Lista de backups históricos indisponível:', error.message);
+  }
+
+  return candidates
+    .filter((item) => Number(item.summary?.teams || 0) > 0)
+    .sort((a, b) => new Date(b.savedAt || b.exportedAt || 0).getTime() - new Date(a.savedAt || a.exportedAt || 0).getTime())[0] || null;
 }
 
 async function restoreBestBackup() {
