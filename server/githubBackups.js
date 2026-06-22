@@ -265,15 +265,23 @@ async function listBackupsFromGitHub(options = {}) {
 
   const files = [];
 
-  for (const dir of monthDirs.filter((item) => item.type === 'dir').slice(-8).reverse()) {
+  const sortedMonthDirs = monthDirs
+    .filter((item) => item.type === 'dir')
+    .sort((a, b) => String(b.name || '').localeCompare(String(a.name || '')))
+    .slice(0, 8);
+
+  for (const dir of sortedMonthDirs) {
     const entries = await listGithubDirectory(config, dir.path);
     files.push(...entries.filter((item) => item.type === 'file' && item.name.endsWith('.json')));
-    if (files.length >= limit) break;
   }
+
+  const sortedFiles = files
+    .sort((a, b) => String(b.name || '').localeCompare(String(a.name || '')))
+    .slice(0, limit);
 
   const backups = [];
 
-  for (const file of files.slice(0, limit)) {
+  for (const file of sortedFiles) {
     const content = await fetchBackupFromGitHubPath(file.path).catch(() => null);
     if (!content) continue;
 

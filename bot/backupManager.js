@@ -39,7 +39,10 @@ function formatDate(value) {
 
 function backupLabel(item = {}) {
   const summary = item.summary || {};
-  return `${formatDate(item.savedAt || item.exportedAt)} • ${summary.teams || 0} times • ${summary.users || 0} users`;
+  const teams = Number(summary.teams || 0);
+  const icon = teams > 0 ? '✅' : '⚠️';
+  const tag = item.isLatest ? 'LATEST • ' : '';
+  return `${icon} ${tag}${formatDate(item.savedAt || item.exportedAt)} • ${teams} times • ${summary.users || 0} users`;
 }
 
 function backupDescription(item = {}) {
@@ -247,14 +250,56 @@ async function handleBackupNow(message) {
 }
 
 async function handleBackupsMenu(message) {
-  const backups = await githubBackups.listBackupsFromGitHub({ limit: 25 });
+  const backups = [];
 
-  if (!backups.length) {
+  try {
+    const latest = await githubBackups.fetchBackupFromGitHubPath('latest/void-arena-backup-latest.json');
+    backups.push({
+      path: 'latest/void-arena-backup-latest.json',
+      isLatest: true,
+      savedAt: latest.githubBackup?.savedAt || latest.exportedAt || null,
+      exportedAt: latest.exportedAt || null,
+      reason: latest.githubBackup?.reason || 'latest',
+      summary: latest.summary || {}
+    });
+  } catch (error) {
+    console.warn('⚠️ Latest não encontrado no menu de backups:', error.message);
+  }
+
+  try {
+    backups.push(...await githubBackups.listBackupsFromGitHub({ limit: 50 }));
+  } catch (error) {
+    console.warn('⚠️ Histórico de backups indisponível:', error.message);
+  }
+
+  const unique = [];
+  const seen = new Set();
+
+  for (const item of backups) {
+    const path = item.path || item.backupPath;
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    unique.push(item);
+  }
+
+  const sortedBackups = unique.sort((a, b) => {
+    const aTeams = Number(a.summary?.teams || 0);
+    const bTeams = Number(b.summary?.teams || 0);
+
+    if (aTeams > 0 && bTeams === 0) return -1;
+    if (aTeams === 0 && bTeams > 0) return 1;
+    if (a.isLatest && !b.isLatest) return -1;
+    if (!a.isLatest && b.isLatest) return 1;
+
+    return new Date(b.savedAt || b.exportedAt || 0).getTime() - new Date(a.savedAt || a.exportedAt || 0).getTime();
+  });
+
+  if (!sortedBackups.length) {
     await message.reply('❌ Nenhum backup encontrado no GitHub ainda.');
     return;
   }
 
-  const options = backups.slice(0, 25).map((item) => ({
+  const options = sortedBackups.slice(0, 25).map((item) => ({
     label: backupLabel(item).slice(0, 100),
     description: backupDescription(item),
     value: backupValue(item)
