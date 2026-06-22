@@ -258,6 +258,49 @@ async function listGithubDirectory(config, dirPath) {
   }
 }
 
+
+async function findGithubBackupFile(config, targetPath) {
+  const target = String(targetPath || '').trim();
+  const targetName = target.split('/').pop();
+
+  const monthDirs = await listGithubDirectory(config, 'backups');
+
+  const sortedMonthDirs = monthDirs
+    .filter((item) => item.type === 'dir')
+    .sort((a, b) => String(b.name || '').localeCompare(String(a.name || '')));
+
+  for (const dir of sortedMonthDirs) {
+    const entries = await listGithubDirectory(config, dir.path);
+
+    const found = entries.find((item) => {
+      if (item.type !== 'file') return false;
+      if (!item.name.endsWith('.json')) return false;
+
+      return item.path === target || item.name === targetName;
+    });
+
+    if (found) return found;
+  }
+
+  return null;
+}
+
+async function readGithubJsonFileBySha(config, fileInfo) {
+  if (!fileInfo?.sha) {
+    throw new Error('Arquivo de backup encontrado, mas sem SHA.');
+  }
+
+  const blob = await githubRequest(config, `/git/blobs/${fileInfo.sha}`, {
+    method: 'GET'
+  });
+
+  if (!blob?.content) {
+    throw new Error(`Blob vazio para backup: ${fileInfo.path || fileInfo.name}`);
+  }
+
+  return JSON.parse(decodeBase64Utf8(blob.content));
+}
+
 async function listBackupsFromGitHub(options = {}) {
   const config = requireConfig();
   const limit = Math.max(1, Math.min(100, Number(options.limit || 25)));
@@ -300,13 +343,27 @@ async function listBackupsFromGitHub(options = {}) {
 
 async function fetchBackupFromGitHubPath(filePath) {
   const config = requireConfig();
-  const file = await readGithubFile(config, filePath);
+  const normalizedPath = String(filePath || '').trim();
 
-  if (!file?.content) {
-    throw new Error(`Backup não encontrado: ${filePath}`);
+  // 1) tenta pelo caminho exato
+  try {
+    const file = await readGithubFile(config, normalizedPath);
+
+    if (file?.content) {
+      return JSON.parse(decodeBase64Utf8(file.content));
+    }
+  } catch (error) {
+    console.warn(`⚠️ Backup não abriu pelo caminho exato (${normalizedPath}):`, error.message);
   }
 
-  return JSON.parse(decodeBase64Utf8(file.content));
+  // 2) fallback: procura o arquivo pelo path ou pelo nome dentro de /backups
+  const found = await findGithubBackupFile(config, normalizedPath);
+
+  if (!found) {
+    throw new Error(`Backup não encontrado: ${normalizedPath}`);
+  }
+
+  return readGithubJsonFileBySha(config, found);
 }
 
 async function restoreBackupFromGitHubPath(storage, filePath) {
