@@ -201,6 +201,36 @@ async function handleRestoreBestButton(interaction) {
   );
 }
 
+
+async function handleRestoreBackupPath(message, backupPath) {
+  if (!backupPath || !backupPath.endsWith('.json')) {
+    await message.reply(
+      '❌ Use assim:\n' +
+      '`.restore-path backups/2026-06/void-arena-backup-2026-06-22T01-49-19-413Z.json`'
+    );
+    return;
+  }
+
+  const loading = await message.reply(`🔄 Restaurando backup exato:\n\`${backupPath}\``);
+
+  try {
+    const result = await githubBackups.restoreBackupFromGitHubPath(storage, backupPath);
+    const summary = result.result?.summary || {};
+
+    await loading.edit(
+      `✅ Backup restaurado com sucesso!\n` +
+      `Arquivo: \`${backupPath}\`\n` +
+      `Users: **${summary.users || 0}** • Times: **${summary.teams || 0}** • Eventos: **${summary.events || 0}** • Treinos: **${summary.trainingSubmissions || 0}**`
+    );
+  } catch (error) {
+    await loading.edit(
+      `❌ Não consegui restaurar esse backup.\n` +
+      `Arquivo: \`${backupPath}\`\n` +
+      `Erro: \`${error.message}\``
+    );
+  }
+}
+
 async function handleBackupNow(message) {
   const status = await storage.readDatabaseStatus();
 
@@ -407,6 +437,16 @@ function registerBackupManager(client) {
       if (!message.guild || message.author.bot) return;
 
       const content = message.content.trim();
+
+      if (content.startsWith('.restore-path ')) {
+        if (!canManageBackups(message.member)) {
+          await message.reply('❌ Apenas staff/admin pode restaurar backups.');
+          return;
+        }
+
+        const backupPath = content.replace('.restore-path ', '').trim();
+        await handleRestoreBackupPath(message, backupPath);
+      }
 
       if (content === '.db-status') {
         if (!canManageBackups(message.member)) {
