@@ -295,6 +295,21 @@ function normalizeTrainingSubmission(raw = {}) {
 
 
 
+function normalizeApplicationComment(raw = {}) {
+  const now = new Date().toISOString();
+
+  return {
+    id: String(raw.id || `application_comment_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+    authorId: String(raw.authorId || '').trim(),
+    authorDiscordId: String(raw.authorDiscordId || '').trim(),
+    authorName: String(raw.authorName || 'Equipe Hollow Nexus').trim().slice(0, 100),
+    content: String(raw.content || '').trim().slice(0, 1200),
+    deliveredToDiscord: Boolean(raw.deliveredToDiscord),
+    dmError: String(raw.dmError || '').trim().slice(0, 240),
+    createdAt: raw.createdAt || now
+  };
+}
+
 function normalizePlayerApplication(raw = {}) {
   const now = new Date().toISOString();
 
@@ -1321,6 +1336,45 @@ async function savePlayerApplication(payload = {}) {
   });
 }
 
+async function addPlayerApplicationComment(id, comment = {}) {
+  const safeId = String(id || '').trim();
+  if (!safeId) throw new Error('Inscrição inválida.');
+
+  const normalizedComment = normalizeApplicationComment({
+    ...comment,
+    id: comment.id || `application_comment_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    createdAt: comment.createdAt || new Date().toISOString()
+  });
+
+  if (!normalizedComment.content) {
+    throw new Error('Escreva um comentário.');
+  }
+
+  return updateDatabase((db) => {
+    db.playerApplications = Array.isArray(db.playerApplications)
+      ? db.playerApplications.map(normalizePlayerApplication)
+      : [];
+
+    const index = db.playerApplications.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Inscrição não encontrada.');
+
+    const current = normalizePlayerApplication(db.playerApplications[index]);
+    const comments = Array.isArray(current.comments) ? current.comments : [];
+
+    db.playerApplications[index] = normalizePlayerApplication({
+      ...current,
+      comments: [...comments, normalizedComment].slice(-80),
+      notes: normalizedComment.content,
+      updatedAt: new Date().toISOString()
+    });
+
+    return {
+      application: db.playerApplications[index],
+      comment: normalizedComment
+    };
+  });
+}
+
 async function updatePlayerApplicationStatus(id, updates = {}) {
   const safeId = String(id || '').trim();
   if (!safeId) throw new Error('Inscrição inválida.');
@@ -1348,6 +1402,7 @@ async function updatePlayerApplicationStatus(id, updates = {}) {
 
 
 module.exports = {
+  addPlayerApplicationComment,
   updatePlayerApplicationStatus,
   savePlayerApplication,
   readPlayerApplications,

@@ -52,6 +52,7 @@ const STORAGE_METHODS = new Set([
   'readBracket',
   'writeBracket',
   'updatePlayerApplicationStatus',
+  'addPlayerApplicationComment',
   'savePlayerApplication',
   'readPlayerApplications',
   'updateTrainingSubmissionStatus',
@@ -550,6 +551,100 @@ async function sendTrainingCommentDM(client, payload = {}) {
   };
 }
 
+
+async function notifyPlayerApplicationLog(client, application = {}) {
+  const channelId = String(
+    process.env.APPLICATION_LOG_CHANNEL_ID ||
+    process.env.TRAINING_LOG_CHANNEL_ID ||
+    ''
+  ).trim();
+
+  if (!channelId || !client?.channels?.fetch) return { sent: false, reason: 'no_channel' };
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.send) return { sent: false, reason: 'invalid_channel' };
+
+  const message = await channel.send({
+    embeds: [
+      {
+        title: '📋 Nova inscrição Hollow Nexus',
+        color: 0x8b5cf6,
+        description:
+          `**Jogador:** ${application.userName || application.discordTag || 'Jogador'}\n` +
+          `**Posição:** ${application.primaryPosition || '-'} / ${application.secondaryPosition || '-'}\n` +
+          `**Estilo:** ${application.playStyle || '-'}\n` +
+          `**Origem:** ${application.source || 'site'}\n\n` +
+          `Abra a página de Formulários no site para analisar a inscrição completa.`,
+        timestamp: new Date().toISOString()
+      }
+    ]
+  }).catch(() => null);
+
+  return { sent: Boolean(message), channelId, messageId: message?.id || '' };
+}
+
+async function createPlayerApplicationFromInternal(client, payload = {}) {
+  const application = await storage.savePlayerApplication(payload);
+  const log = await notifyPlayerApplicationLog(client, application);
+  return { success: true, application, log };
+}
+
+async function sendPlayerApplicationCommentDM(client, applicationId, payload = {}) {
+  const content = String(payload.content || '').trim().slice(0, 1200);
+  if (!content) throw new Error('Escreva um comentário.');
+
+  const applications = await storage.readPlayerApplications({ limit: 500 });
+  const application = applications.find((item) => String(item.id) === String(applicationId));
+
+  if (!application) throw new Error('Inscrição não encontrada.');
+
+  const discordId = String(application.discordId || '').trim();
+
+  let deliveredToDiscord = false;
+  let dmError = '';
+
+  if (discordId && client?.users?.fetch) {
+    try {
+      const user = await client.users.fetch(discordId);
+      await user.send({
+        content: [
+          '📋 **Mensagem da equipe Hollow Nexus sobre sua inscrição**',
+          '',
+          `**Analista:** ${payload.authorName || 'Equipe Hollow Nexus'}`,
+          '',
+          content,
+          '',
+          'Void Arena • Hollow Nexus'
+        ].join('\n'),
+        allowedMentions: { parse: [] }
+      });
+
+      deliveredToDiscord = true;
+    } catch (error) {
+      dmError = error.message || 'Não foi possível enviar DM.';
+    }
+  } else {
+    dmError = 'A inscrição não tem Discord ID vinculado.';
+  }
+
+  const saved = await storage.addPlayerApplicationComment(applicationId, {
+    authorId: payload.authorId || '',
+    authorDiscordId: payload.authorDiscordId || '',
+    authorName: payload.authorName || 'Equipe Hollow Nexus',
+    content,
+    deliveredToDiscord,
+    dmError
+  });
+
+  return {
+    success: true,
+    deliveredToDiscord,
+    dmError,
+    application: saved.application,
+    comment: saved.comment
+  };
+}
+
 function startInternalApi({ client, port = 3002 } = {}) {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
@@ -615,6 +710,39 @@ function startInternalApi({ client, port = 3002 } = {}) {
         submissionId: req.params.id
       });
 
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+
+  app.get('/internal/player-applications', async (_req, res) => {
+    const applications = await storage.readPlayerApplications({ limit: 500 });
+    return res.json({ success: true, applications });
+  });
+
+  app.post('/internal/player-applications/create', async (req, res) => {
+    try {
+      const result = await createPlayerApplicationFromInternal(client, req.body || {});
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  });
+
+  app.patch('/internal/player-applications/:id/status', async (req, res) => {
+    try {
+      const application = await storage.updatePlayerApplicationStatus(req.params.id, req.body || {});
+      return res.json({ success: true, application });
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post('/internal/player-applications/:id/comment', async (req, res) => {
+    try {
+      const result = await sendPlayerApplicationCommentDM(client, req.params.id, req.body || {});
       return res.json(result);
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });

@@ -237,6 +237,7 @@ async function handleModalTwo(interaction) {
   }
 
   const saved = await storage.savePlayerApplication(finalData);
+  await notifyApplicationLog(interaction.client, saved);
   sessions.delete(key);
 
   await interaction.reply({
@@ -253,6 +254,30 @@ async function handleModalTwo(interaction) {
         )
     ]
   });
+}
+
+async function notifyApplicationLog(client, application = {}) {
+  const channelId = String(process.env.APPLICATION_LOG_CHANNEL_ID || process.env.TRAINING_LOG_CHANNEL_ID || '').trim();
+  if (!channelId || !client?.channels?.fetch) return;
+
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.send) return;
+
+  await channel.send({
+    embeds: [
+      {
+        title: '📋 Nova inscrição Hollow Nexus',
+        color: 0x8b5cf6,
+        description:
+          `**Jogador:** ${application.userName || application.discordTag || 'Jogador'}\n` +
+          `**Posição:** ${application.primaryPosition || '-'} / ${application.secondaryPosition || '-'}\n` +
+          `**Estilo:** ${application.playStyle || '-'}\n` +
+          `**Origem:** Discord\n\n` +
+          `Abra a página de Formulários no site para analisar a inscrição completa.`,
+        timestamp: new Date().toISOString()
+      }
+    ]
+  }).catch(() => {});
 }
 
 function registerPlayerApplications(client) {
