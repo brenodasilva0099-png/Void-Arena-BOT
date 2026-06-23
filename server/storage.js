@@ -294,6 +294,56 @@ function normalizeTrainingSubmission(raw = {}) {
 
 
 
+
+function normalizePlayerApplication(raw = {}) {
+  const now = new Date().toISOString();
+
+  const normalizePosition = (value) => {
+    const allowed = ['Goleiro', 'Fixo', 'Ala Defensivo', 'Ala Ofensivo', 'Pivô'];
+    const found = allowed.find((item) => item.toLowerCase() === String(value || '').trim().toLowerCase());
+    return found || String(value || '').trim().slice(0, 40);
+  };
+
+  const normalizeStyle = (value) => {
+    const allowed = ['Defensivo', 'Equilibrado', 'Ofensivo'];
+    const found = allowed.find((item) => item.toLowerCase() === String(value || '').trim().toLowerCase());
+    return found || String(value || '').trim().slice(0, 40);
+  };
+
+  const status = ['pending', 'approved', 'rejected', 'archived'].includes(String(raw.status || '').toLowerCase())
+    ? String(raw.status).toLowerCase()
+    : 'pending';
+
+  return {
+    id: String(raw.id || `application_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+    source: ['site', 'discord'].includes(String(raw.source || '').toLowerCase()) ? String(raw.source).toLowerCase() : 'site',
+
+    userId: String(raw.userId || '').trim(),
+    discordId: String(raw.discordId || raw.userDiscordId || '').trim(),
+    discordTag: String(raw.discordTag || '').trim().slice(0, 100),
+    userName: String(raw.userName || raw.name || 'Jogador').trim().slice(0, 100),
+    userAvatar: String(raw.userAvatar || '').trim(),
+
+    realNameSteamCode: String(raw.realNameSteamCode || '').trim().slice(0, 180),
+    age: String(raw.age || '').trim().slice(0, 30),
+    primaryPosition: normalizePosition(raw.primaryPosition),
+    secondaryPosition: normalizePosition(raw.secondaryPosition),
+    playStyle: normalizeStyle(raw.playStyle),
+    experienceHours: String(raw.experienceHours || '').trim().slice(0, 180),
+    previousTeam: String(raw.previousTeam || '').trim().slice(0, 220),
+    availability: String(raw.availability || '').trim().slice(0, 1400),
+    strengths: String(raw.strengths || '').trim().slice(0, 1400),
+    weaknesses: String(raw.weaknesses || '').trim().slice(0, 1400),
+    reason: String(raw.reason || '').trim().slice(0, 1400),
+
+    status,
+    notes: String(raw.notes || '').trim().slice(0, 1000),
+    createdAt: raw.createdAt || now,
+    updatedAt: raw.updatedAt || raw.createdAt || now
+  };
+}
+
+
 function normalizeDatabase(raw = {}) {
   const now = new Date().toISOString();
   const db = clone(EMPTY_DATABASE);
@@ -327,6 +377,9 @@ function normalizeDatabase(raw = {}) {
     ? raw.teamChats.map(normalizeTeamChat).filter((chat) => (chat.type === 'direct' ? chat.participantIds.length >= 2 : chat.teamIds.length >= 2))
     : [];
   db.events = normalizeTournamentEvents(raw.events || raw.settings?.events || []);
+  db.playerApplications = Array.isArray(raw.playerApplications)
+    ? raw.playerApplications.map(normalizePlayerApplication).slice(-500)
+    : [];
   db.trainingSubmissions = Array.isArray(raw.trainingSubmissions)
     ? raw.trainingSubmissions.map(normalizeTrainingSubmission).slice(-1000)
     : [];
@@ -449,6 +502,7 @@ async function readDatabaseStatus() {
     messageArchives: Array.isArray(db.messageArchives) ? db.messageArchives.length : 0,
     teamChats: Array.isArray(db.teamChats) ? db.teamChats.length : 0,
     events: Array.isArray(db.events) ? db.events.length : 0,
+    playerApplications: Array.isArray(db.playerApplications) ? db.playerApplications.length : 0,
     trainingSubmissions: Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions.length : 0,
     bracketSlots: Array.isArray(db.bracket.slots) ? db.bracket.slots.filter(Boolean).length : 0
   };
@@ -1222,8 +1276,81 @@ async function importDatabaseBackup(payload = {}) {
   };
 }
 
+async function readPlayerApplications(options = {}) {
+  const db = await readDatabase();
+  const limit = Math.max(1, Math.min(500, Number(options.limit || 120)));
+  const status = String(options.status || '').trim();
+
+  return (Array.isArray(db.playerApplications) ? db.playerApplications : [])
+    .map(normalizePlayerApplication)
+    .filter((item) => !status || item.status === status)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, limit);
+}
+
+async function savePlayerApplication(payload = {}) {
+  const now = new Date().toISOString();
+
+  const application = normalizePlayerApplication({
+    ...payload,
+    id: payload.id || `application_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+    createdAt: payload.createdAt || now,
+    updatedAt: now
+  });
+
+  if (!application.realNameSteamCode) throw new Error('Informe Nome Real / Código de amizade da Steam.');
+  if (!application.age) throw new Error('Informe a idade.');
+  if (!application.primaryPosition) throw new Error('Informe a posição principal.');
+  if (!application.secondaryPosition) throw new Error('Informe a posição secundária.');
+  if (!application.playStyle) throw new Error('Informe o estilo de jogo.');
+  if (!application.experienceHours) throw new Error('Informe tempo de experiência/horas jogadas.');
+  if (!application.availability) throw new Error('Informe seus horários disponíveis.');
+  if (!application.strengths) throw new Error('Informe seus pontos fortes.');
+  if (!application.weaknesses) throw new Error('Informe seus pontos fracos.');
+  if (!application.reason) throw new Error('Informe por que deseja entrar.');
+
+  return updateDatabase((db) => {
+    db.playerApplications = Array.isArray(db.playerApplications)
+      ? db.playerApplications.map(normalizePlayerApplication)
+      : [];
+
+    db.playerApplications.push(application);
+    db.playerApplications = db.playerApplications.slice(-500);
+
+    return application;
+  });
+}
+
+async function updatePlayerApplicationStatus(id, updates = {}) {
+  const safeId = String(id || '').trim();
+  if (!safeId) throw new Error('Inscrição inválida.');
+
+  return updateDatabase((db) => {
+    db.playerApplications = Array.isArray(db.playerApplications)
+      ? db.playerApplications.map(normalizePlayerApplication)
+      : [];
+
+    const index = db.playerApplications.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Inscrição não encontrada.');
+
+    const current = normalizePlayerApplication(db.playerApplications[index]);
+
+    db.playerApplications[index] = normalizePlayerApplication({
+      ...current,
+      status: updates.status || current.status,
+      notes: updates.notes ?? current.notes,
+      updatedAt: new Date().toISOString()
+    });
+
+    return db.playerApplications[index];
+  });
+}
+
 
 module.exports = {
+  updatePlayerApplicationStatus,
+  savePlayerApplication,
+  readPlayerApplications,
   addTrainingSubmissionComment,
   updateTrainingSubmissionStatus,
   saveTrainingSubmission,
