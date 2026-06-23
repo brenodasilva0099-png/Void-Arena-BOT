@@ -11,6 +11,29 @@ const {
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 
+const backupPathTokenCache = new Map();
+
+function makeBackupToken(path = '') {
+  const token = `bkp_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 9)}`;
+  backupPathTokenCache.set(token, {
+    path: String(path || ''),
+    expiresAt: Date.now() + (15 * 60 * 1000)
+  });
+  return token;
+}
+
+function getBackupPathFromToken(token = '') {
+  const cached = backupPathTokenCache.get(String(token || ''));
+  if (!cached) return '';
+
+  if (cached.expiresAt < Date.now()) {
+    backupPathTokenCache.delete(String(token || ''));
+    return '';
+  }
+
+  return cached.path;
+}
+
 const IDS = {
   refresh: 'control:refresh',
   backup: 'control:backup',
@@ -209,11 +232,12 @@ function backupOption(item = {}) {
   const teams = Number(item.summary?.teams || 0);
   const icon = teams > 0 ? '✅' : '⚠️';
   const label = `${icon} ${item.isLatest ? 'LATEST • ' : ''}${formatDate(item.savedAt || item.exportedAt)} • ${teams} times • ${item.summary?.users || 0} users`;
+  const description = `Eventos: ${item.summary?.events || 0} • Treinos: ${item.summary?.trainingSubmissions || 0} • Formulários: ${item.summary?.playerApplications || 0}`;
 
   return {
     label: label.slice(0, 100),
-    description: `Eventos: ${item.summary?.events || 0} • Treinos: ${item.summary?.trainingSubmissions || 0} • Formulários: ${item.summary?.playerApplications || 0}`.slice(0, 100),
-    value: Buffer.from(String(item.path || ''), 'utf8').toString('base64url').slice(0, 100)
+    description: description.slice(0, 100),
+    value: makeBackupToken(item.path || '')
   };
 }
 
@@ -232,7 +256,7 @@ async function listBackupOptions() {
   } catch {}
 
   try {
-    items.push(...await githubBackups.listBackupsFromGitHub({ limit: 50 }));
+    items.push(...await githubBackups.listBackupsFromGitHub({ limit: 200 }));
   } catch {}
 
   const seen = new Set();
@@ -256,7 +280,7 @@ async function listBackupOptions() {
 }
 
 function decodePath(value = '') {
-  return Buffer.from(String(value || ''), 'base64url').toString('utf8');
+  return getBackupPathFromToken(value);
 }
 
 function registerControlPanel(client) {
@@ -325,21 +349,24 @@ function registerControlPanel(client) {
       }
 
       if (interaction.customId === IDS.backups) {
+        await interaction.deferReply({ ephemeral: true });
+
         const backups = await listBackupOptions();
 
         if (!backups.length) {
-          await interaction.reply({ content: '❌ Nenhum backup encontrado.', ephemeral: true });
+          await interaction.editReply({ content: '❌ Nenhum backup encontrado.' });
           return;
         }
 
-        await interaction.reply({
-          ephemeral: true,
-          content: 'Escolha uma versão para restaurar:',
+        await interaction.editReply({
+          content:
+            '🧩 **Backups encontrados**\n' +
+            'Escolha abaixo qual versão deseja restaurar. Estou mostrando os 25 melhores/mais recentes porque o Discord limita o menu a 25 opções.',
           components: [
             new ActionRowBuilder().addComponents(
               new StringSelectMenuBuilder()
                 .setCustomId(IDS.backupSelect)
-                .setPlaceholder('Escolha um backup')
+                .setPlaceholder('Escolha um backup para restaurar')
                 .addOptions(backups.map(backupOption))
             )
           ]
@@ -351,10 +378,17 @@ function registerControlPanel(client) {
         await interaction.deferReply({ ephemeral: true });
 
         const path = decodePath(interaction.values?.[0] || '');
+
+        if (!path) {
+          await interaction.editReply('⚠️ Essa seleção expirou. Clique em **Backups** de novo e selecione novamente.');
+          return;
+        }
+
         const result = await githubBackups.restoreBackupFromGitHubPath(storage, path);
         const summary = result.result?.summary || {};
 
         await interaction.editReply(`✅ Backup restaurado!\nArquivo: \`${path}\`\nTimes: **${summary.teams || 0}** • Users: **${summary.users || 0}**`);
+        await updatePanelMessage(interaction.message).catch(() => {});
         return;
       }
 
