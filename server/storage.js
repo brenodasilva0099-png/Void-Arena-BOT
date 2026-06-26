@@ -88,7 +88,7 @@ function normalizeEventRegistration(raw = {}) {
 
 function normalizeEventRegistrationRequest(raw = {}) {
   const now = new Date().toISOString();
-  const status = ['pending_validation', 'approved', 'rejected', 'cancelled'].includes(String(raw.status || '').toLowerCase())
+  const status = ['pending_validation', 'submitted_validation', 'approved', 'rejected', 'cancelled'].includes(String(raw.status || '').toLowerCase())
     ? String(raw.status).toLowerCase()
     : 'pending_validation';
 
@@ -102,6 +102,14 @@ function normalizeEventRegistrationRequest(raw = {}) {
     responsibleDiscordId: String(raw.responsibleDiscordId || raw.discordId || '').trim(),
     responsibleName: String(raw.responsibleName || '').trim().slice(0, 120),
     paymentProof: String(raw.paymentProof || '').trim().slice(0, 1200),
+    paymentProofFile: raw.paymentProofFile && typeof raw.paymentProofFile === 'object' ? {
+      id: String(raw.paymentProofFile.id || '').trim(),
+      url: String(raw.paymentProofFile.url || '').trim(),
+      proxyUrl: String(raw.paymentProofFile.proxyUrl || raw.paymentProofFile.proxyURL || '').trim(),
+      name: String(raw.paymentProofFile.name || raw.paymentProofFile.filename || 'comprovante').trim().slice(0, 160),
+      contentType: String(raw.paymentProofFile.contentType || raw.paymentProofFile.content_type || '').trim().slice(0, 120),
+      size: Number(raw.paymentProofFile.size || 0) || 0
+    } : null,
     validationDiscordChannelId: String(raw.validationDiscordChannelId || '').trim(),
     validationDiscordMessageId: String(raw.validationDiscordMessageId || '').trim(),
     status,
@@ -833,6 +841,35 @@ async function attachValidationMessageToRegistrationRequest(requestId, payload =
     return db.eventRegistrationRequests[index];
   });
 }
+
+
+async function submitEventRegistrationProof(requestId, payload = {}) {
+  const safeId = String(requestId || '').trim();
+  if (!safeId) throw new Error('Pedido de validação inválido.');
+
+  return updateDatabase((db) => {
+    db.eventRegistrationRequests = Array.isArray(db.eventRegistrationRequests)
+      ? db.eventRegistrationRequests.map(normalizeEventRegistrationRequest)
+      : [];
+
+    const index = db.eventRegistrationRequests.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Pedido de validação não encontrado.');
+
+    db.eventRegistrationRequests[index] = normalizeEventRegistrationRequest({
+      ...db.eventRegistrationRequests[index],
+      responsibleName: payload.responsibleName || db.eventRegistrationRequests[index].responsibleName,
+      paymentProof: payload.paymentProof || db.eventRegistrationRequests[index].paymentProof,
+      paymentProofFile: payload.paymentProofFile || db.eventRegistrationRequests[index].paymentProofFile,
+      validationDiscordChannelId: payload.validationDiscordChannelId || db.eventRegistrationRequests[index].validationDiscordChannelId,
+      validationDiscordMessageId: payload.validationDiscordMessageId || db.eventRegistrationRequests[index].validationDiscordMessageId,
+      status: 'submitted_validation',
+      updatedAt: new Date().toISOString()
+    });
+
+    return db.eventRegistrationRequests[index];
+  });
+}
+
 
 async function approveEventRegistrationRequest(requestId, payload = {}) {
   const safeId = String(requestId || '').trim();
@@ -1588,6 +1625,7 @@ async function updatePlayerApplicationStatus(id, updates = {}) {
 
 
 module.exports = {
+  submitEventRegistrationProof,
   rejectEventRegistrationRequest,
   approveEventRegistrationRequest,
   attachValidationMessageToRegistrationRequest,
