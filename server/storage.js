@@ -45,7 +45,8 @@ const EMPTY_DATABASE = {
   messageArchives: [],
   teamChats: [],
   events: [],
-  trainingSubmissions: []
+  trainingSubmissions: [],
+  eventRegistrationRequests: []
 };
 
 
@@ -85,6 +86,32 @@ function normalizeEventRegistration(raw = {}) {
   };
 }
 
+function normalizeEventRegistrationRequest(raw = {}) {
+  const now = new Date().toISOString();
+  const status = ['pending_validation', 'approved', 'rejected', 'cancelled'].includes(String(raw.status || '').toLowerCase())
+    ? String(raw.status).toLowerCase()
+    : 'pending_validation';
+
+  return {
+    id: String(raw.id || `eventregreq_${Date.now()}_${Math.random().toString(16).slice(2)}`),
+    eventId: String(raw.eventId || 'coliseu-void-arena').trim() || 'coliseu-void-arena',
+    teamId: String(raw.teamId || '').trim(),
+    teamName: String(raw.teamName || '').trim().slice(0, 120),
+    teamTag: String(raw.teamTag || '').trim().slice(0, 24),
+    userId: String(raw.userId || '').trim(),
+    responsibleDiscordId: String(raw.responsibleDiscordId || raw.discordId || '').trim(),
+    responsibleName: String(raw.responsibleName || '').trim().slice(0, 120),
+    paymentProof: String(raw.paymentProof || '').trim().slice(0, 1200),
+    validationDiscordChannelId: String(raw.validationDiscordChannelId || '').trim(),
+    validationDiscordMessageId: String(raw.validationDiscordMessageId || '').trim(),
+    status,
+    createdAt: raw.createdAt || now,
+    updatedAt: raw.updatedAt || raw.createdAt || now,
+    approvedAt: raw.approvedAt || null,
+    approvedBy: String(raw.approvedBy || '').trim()
+  };
+}
+
 function normalizeTournamentEvent(raw = {}) {
   const now = new Date().toISOString();
   const teamLimit = normalizeTournamentTeamLimit(raw.teamLimit || 16);
@@ -114,6 +141,9 @@ function normalizeTournamentEvent(raw = {}) {
       ? String(raw.status).toLowerCase()
       : 'open',
     description: String(raw.description || 'Campeonato principal da comunidade. Inscreva seu time, confira o limite de vagas e envie o comprovante pelo ticket do Discord.').trim().slice(0, 260),
+    logo: String(raw.logo || raw.thumbnail || '').trim().slice(0, 1200),
+    banner: String(raw.banner || '').trim().slice(0, 1200),
+    accentColor: String(raw.accentColor || raw.color || '#8b5cf6').trim().slice(0, 24),
     registrations: uniqueRegistrations,
     createdAt: raw.createdAt || now,
     updatedAt: raw.updatedAt || raw.createdAt || now
@@ -397,6 +427,9 @@ function normalizeDatabase(raw = {}) {
     : [];
   db.trainingSubmissions = Array.isArray(raw.trainingSubmissions)
     ? raw.trainingSubmissions.map(normalizeTrainingSubmission).slice(-1000)
+    : [];
+  db.eventRegistrationRequests = Array.isArray(raw.eventRegistrationRequests)
+    ? raw.eventRegistrationRequests.map(normalizeEventRegistrationRequest).slice(-1000)
     : [];
 
   return db;
@@ -713,6 +746,159 @@ async function writeTournamentSettings(settings = {}) {
     };
 
     return db.settings.tournament;
+  });
+}
+
+
+
+async function readEventRegistrationRequests(options = {}) {
+  const db = await readDatabase();
+  const limit = Math.max(1, Math.min(1000, Number(options.limit || 200)));
+  const status = String(options.status || '').trim();
+
+  return (Array.isArray(db.eventRegistrationRequests) ? db.eventRegistrationRequests : [])
+    .map(normalizeEventRegistrationRequest)
+    .filter((item) => !status || item.status === status)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, limit);
+}
+
+async function createEventRegistrationRequest(payload = {}) {
+  const safeEventId = String(payload.eventId || 'coliseu-void-arena').trim() || 'coliseu-void-arena';
+  const safeTeamId = String(payload.teamId || '').trim();
+  if (!safeTeamId) throw new Error('Selecione um time para solicitar inscrição.');
+
+  return updateDatabase((db) => {
+    db.events = normalizeTournamentEvents(db.events);
+    db.eventRegistrationRequests = Array.isArray(db.eventRegistrationRequests)
+      ? db.eventRegistrationRequests.map(normalizeEventRegistrationRequest)
+      : [];
+
+    const event = db.events.find((item) => item.id === safeEventId);
+    if (!event) throw new Error('Evento não encontrado.');
+
+    const alreadyApproved = event.registrations.find((registration) => (
+      registration.teamId === safeTeamId && registration.status !== 'rejected' && registration.status !== 'cancelled'
+    ));
+
+    if (alreadyApproved) {
+      return { request: null, alreadyRegistered: true, event };
+    }
+
+    const existing = db.eventRegistrationRequests.find((item) => (
+      item.eventId === safeEventId &&
+      item.teamId === safeTeamId &&
+      item.status === 'pending_validation'
+    ));
+
+    if (existing) {
+      return { request: existing, alreadyPending: true, event };
+    }
+
+    const request = normalizeEventRegistrationRequest({
+      ...payload,
+      eventId: safeEventId,
+      teamId: safeTeamId,
+      status: 'pending_validation',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    db.eventRegistrationRequests.push(request);
+    db.eventRegistrationRequests = db.eventRegistrationRequests.slice(-1000);
+
+    return { request, alreadyPending: false, event };
+  });
+}
+
+async function attachValidationMessageToRegistrationRequest(requestId, payload = {}) {
+  const safeId = String(requestId || '').trim();
+  if (!safeId) throw new Error('Pedido de validação inválido.');
+
+  return updateDatabase((db) => {
+    db.eventRegistrationRequests = Array.isArray(db.eventRegistrationRequests)
+      ? db.eventRegistrationRequests.map(normalizeEventRegistrationRequest)
+      : [];
+
+    const index = db.eventRegistrationRequests.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Pedido de validação não encontrado.');
+
+    db.eventRegistrationRequests[index] = normalizeEventRegistrationRequest({
+      ...db.eventRegistrationRequests[index],
+      validationDiscordChannelId: payload.validationDiscordChannelId || db.eventRegistrationRequests[index].validationDiscordChannelId,
+      validationDiscordMessageId: payload.validationDiscordMessageId || db.eventRegistrationRequests[index].validationDiscordMessageId,
+      updatedAt: new Date().toISOString()
+    });
+
+    return db.eventRegistrationRequests[index];
+  });
+}
+
+async function approveEventRegistrationRequest(requestId, payload = {}) {
+  const safeId = String(requestId || '').trim();
+  if (!safeId) throw new Error('Pedido de validação inválido.');
+
+  return updateDatabase((db) => {
+    db.events = normalizeTournamentEvents(db.events);
+    db.eventRegistrationRequests = Array.isArray(db.eventRegistrationRequests)
+      ? db.eventRegistrationRequests.map(normalizeEventRegistrationRequest)
+      : [];
+
+    const requestIndex = db.eventRegistrationRequests.findIndex((item) => item.id === safeId);
+    if (requestIndex < 0) throw new Error('Pedido de validação não encontrado.');
+
+    const request = normalizeEventRegistrationRequest({
+      ...db.eventRegistrationRequests[requestIndex],
+      ...payload,
+      status: 'approved',
+      approvedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    const eventIndex = db.events.findIndex((event) => event.id === request.eventId);
+    if (eventIndex < 0) throw new Error('Evento não encontrado.');
+
+    const event = normalizeTournamentEvent(db.events[eventIndex]);
+    const exists = event.registrations.some((registration) => registration.teamId === request.teamId);
+
+    if (!exists) {
+      event.registrations.push(normalizeEventRegistration({
+        teamId: request.teamId,
+        userId: request.userId,
+        status: 'approved',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }));
+    }
+
+    event.updatedAt = new Date().toISOString();
+    db.events[eventIndex] = event;
+    db.eventRegistrationRequests[requestIndex] = request;
+
+    return { request, event };
+  });
+}
+
+async function rejectEventRegistrationRequest(requestId, payload = {}) {
+  const safeId = String(requestId || '').trim();
+  if (!safeId) throw new Error('Pedido de validação inválido.');
+
+  return updateDatabase((db) => {
+    db.eventRegistrationRequests = Array.isArray(db.eventRegistrationRequests)
+      ? db.eventRegistrationRequests.map(normalizeEventRegistrationRequest)
+      : [];
+
+    const index = db.eventRegistrationRequests.findIndex((item) => item.id === safeId);
+    if (index < 0) throw new Error('Pedido de validação não encontrado.');
+
+    db.eventRegistrationRequests[index] = normalizeEventRegistrationRequest({
+      ...db.eventRegistrationRequests[index],
+      ...payload,
+      status: 'rejected',
+      updatedAt: new Date().toISOString()
+    });
+
+    return db.eventRegistrationRequests[index];
   });
 }
 
@@ -1402,6 +1588,11 @@ async function updatePlayerApplicationStatus(id, updates = {}) {
 
 
 module.exports = {
+  rejectEventRegistrationRequest,
+  approveEventRegistrationRequest,
+  attachValidationMessageToRegistrationRequest,
+  createEventRegistrationRequest,
+  readEventRegistrationRequests,
   addPlayerApplicationComment,
   updatePlayerApplicationStatus,
   savePlayerApplication,

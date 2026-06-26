@@ -44,10 +44,24 @@ const IDS = {
   training: 'control:training'
 };
 
+function envRoleIds(...names) {
+  return names
+    .flatMap((name) => String(process.env[name] || '').split(','))
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function memberHasAnyRole(member, roleIds = []) {
+  if (!member?.roles?.cache || !roleIds.length) return false;
+  return roleIds.some((id) => member.roles.cache.has(id));
+}
+
 function canManage(member) {
+  const roleIds = envRoleIds('CONTROL_PANEL_ROLE_IDS', 'BACKUP_ROLE_IDS', 'CONFIG_ROLE_IDS', 'ADMIN_ROLE_IDS');
   return Boolean(
     member?.permissions?.has?.(PermissionFlagsBits.Administrator) ||
-    member?.permissions?.has?.(PermissionFlagsBits.ManageGuild)
+    member?.permissions?.has?.(PermissionFlagsBits.ManageGuild) ||
+    memberHasAnyRole(member, roleIds)
   );
 }
 
@@ -66,11 +80,13 @@ function formatDate(value) {
 
 function statusLine(status = {}) {
   return [
-    `Users: **${status.users || 0}**`,
+    `Usuários: **${status.users || 0}**`,
     `Times: **${status.teams || 0}**`,
     `Eventos: **${status.events || 0}**`,
-    `Treinos: **${status.trainingSubmissions || 0}**`,
-    `Formulários: **${status.playerApplications || 0}**`
+    `Partidas: **${status.trainingSubmissions || 0}**`,
+    `Formulários: **${status.playerApplications || 0}**`,
+    `Validações: **${status.eventRegistrationRequests || 0}**`,
+    `Mensagens: **${status.messages || 0}**`
   ].join(' • ');
 }
 
@@ -110,7 +126,7 @@ async function buildPanelEmbed() {
     .setDescription(
       healthy
         ? 'Banco local ativo. Use os botões abaixo para backup, restore e atalhos.'
-        : 'Banco local parece incompleto. Restaure o backup seguro antes de salvar novo backup.'
+        : 'Banco local carregado. Você pode salvar backup do estado atual quando quiser.'
     )
     .addFields(
       {
@@ -131,7 +147,7 @@ async function buildPanelEmbed() {
 
 function panelButtons(current = {}, best = null) {
   const restoreDisabled = !best;
-  const backupDisabled = Number(current.teams || 0) === 0;
+  const backupDisabled = false;
 
   return [
     new ActionRowBuilder().addComponents(
@@ -146,7 +162,7 @@ function panelButtons(current = {}, best = null) {
         .setLabel('Backup agora')
         .setEmoji('💾')
         .setStyle(ButtonStyle.Success)
-        .setDisabled(backupDisabled),
+        .setDisabled(false),
 
       new ButtonBuilder()
         .setCustomId(IDS.restoreBest)
@@ -170,7 +186,7 @@ function panelButtons(current = {}, best = null) {
 
       new ButtonBuilder()
         .setCustomId(IDS.training)
-        .setLabel('Treinos')
+        .setLabel('Partidas')
         .setEmoji('🎥')
         .setStyle(ButtonStyle.Secondary)
     )
@@ -212,17 +228,8 @@ async function saveCurrentBackup() {
   const current = await storage.readDatabaseStatus();
   const best = await findBestBackup();
 
-  if (Number(current.teams || 0) === 0) {
-    return {
-      saved: false,
-      current,
-      best,
-      message: 'Banco local incompleto. Restaure o backup seguro antes de salvar.'
-    };
-  }
-
   const manifest = await githubBackups.saveBackupToGitHub(storage, {
-    reason: 'discord-control-panel'
+    reason: 'discord-control-panel-current-state'
   });
 
   return { saved: true, current, best, manifest };
@@ -408,9 +415,9 @@ function registerControlPanel(client) {
         await interaction.reply({
           ephemeral: true,
           content:
-            '🎥 **Análise de Treinos**\n' +
+            '🎥 **Análise de Partidas**\n' +
             'Site: https://void-arena-site.onrender.com/pages/treinos.html\n\n' +
-            'Para criar painel público de envio de treino, use `.treinos-painel` no canal desejado.'
+            'Para criar painel público de envio de partida, use `.partidas-painel` no canal desejado.'
         });
       }
     } catch (error) {

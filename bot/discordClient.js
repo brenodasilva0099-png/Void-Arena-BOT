@@ -8,6 +8,7 @@ const {
 const { registerTrainingHandlers } = require('./trainingSubmissions');
 const { registerBackupManager } = require('./backupManager');
 const { registerControlPanel } = require('./controlPanel');
+const { registerEventValidation } = require('./eventValidation');
 const { registerPlayerApplications } = require('./playerApplications');
 
 const TOKEN = process.env.DISCORD_TOKEN;
@@ -102,6 +103,7 @@ function registerDiscordHandlers(client) {
   registerTrainingHandlers(client);
   registerBackupManager(client);
   registerControlPanel(client);
+  registerEventValidation(client);
   registerPlayerApplications(client);
 
   client.once(Events.ClientReady, (readyClient) => {

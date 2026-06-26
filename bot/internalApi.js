@@ -1,6 +1,6 @@
 const express = require('express');
 const { Readable } = require('node:stream');
-const { ChannelType } = require('discord.js');
+const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { extractDiscordMessageAttachments } = require('./discordClient');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
@@ -59,6 +59,11 @@ const STORAGE_METHODS = new Set([
   'addTrainingSubmissionComment',
   'saveTrainingSubmission',
   'readTrainingSubmissions',
+  'rejectEventRegistrationRequest',
+  'approveEventRegistrationRequest',
+  'attachValidationMessageToRegistrationRequest',
+  'createEventRegistrationRequest',
+  'readEventRegistrationRequests',
 ]);
 
 function discordChannelKind(type) {
@@ -645,6 +650,81 @@ async function sendPlayerApplicationCommentDM(client, applicationId, payload = {
   };
 }
 
+
+async function createEventValidationRequest(client, payload = {}) {
+  const result = await storage.createEventRegistrationRequest(payload);
+  const request = result.request;
+
+  const validationChannelId = String(
+    payload.validationChannelId ||
+    process.env.EVENT_VALIDATION_CHANNEL_ID ||
+    '1519857078024540270'
+  ).trim();
+
+  if (!request) {
+    return {
+      success: true,
+      ...result,
+      validationChannelId,
+      discordUrl: validationChannelId ? `https://discord.com/channels/@me/${validationChannelId}` : ''
+    };
+  }
+
+  let guildId = '';
+  let discordMessageId = '';
+
+  if (client?.channels?.fetch && validationChannelId) {
+    const channel = await client.channels.fetch(validationChannelId).catch(() => null);
+    guildId = channel?.guild?.id || '';
+
+    if (channel?.send) {
+      const sent = await channel.send({
+        content: request.responsibleDiscordId ? `<@${request.responsibleDiscordId}>` : undefined,
+        embeds: [
+          new EmbedBuilder()
+            .setTitle('📋 Validação de inscrição de time')
+            .setDescription(
+              'Preencha o formulário abaixo para validar a inscrição do time no evento.\n\n' +
+              `**Time:** ${request.teamName || request.teamId}\n` +
+              `**Tag:** ${request.teamTag || '-'}\n` +
+              `**Evento:** ${request.eventId}`
+            )
+            .setColor(0x8b5cf6)
+        ],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`eventval:open:${request.id}`)
+              .setLabel('Preencher validação')
+              .setEmoji('📋')
+              .setStyle(ButtonStyle.Primary)
+          )
+        ],
+        allowedMentions: { users: request.responsibleDiscordId ? [request.responsibleDiscordId] : [] }
+      });
+
+      discordMessageId = sent.id;
+
+      await storage.attachValidationMessageToRegistrationRequest(request.id, {
+        validationDiscordChannelId: validationChannelId,
+        validationDiscordMessageId: discordMessageId
+      });
+    }
+  }
+
+  return {
+    success: true,
+    ...result,
+    validationChannelId,
+    guildId,
+    discordMessageId,
+    discordUrl: guildId
+      ? `https://discord.com/channels/${guildId}/${validationChannelId}`
+      : `https://discord.com/channels/@me/${validationChannelId}`
+  };
+}
+
+
 function startInternalApi({ client, port = 3002 } = {}) {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
@@ -747,6 +827,21 @@ function startInternalApi({ client, port = 3002 } = {}) {
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
     }
+  });
+
+
+  app.post('/internal/event-registration-requests/create', async (req, res) => {
+    try {
+      const result = await createEventValidationRequest(client, req.body || {});
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get('/internal/event-registration-requests', async (_req, res) => {
+    const requests = await storage.readEventRegistrationRequests({ limit: 500 });
+    return res.json({ success: true, requests });
   });
 
   app.get('/internal/health', async (_req, res) => {
