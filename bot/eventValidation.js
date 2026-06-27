@@ -11,6 +11,32 @@ const {
 
 const storage = require('../server/storage');
 
+async function notifySiteRealtime(type, payload = {}) {
+  const siteUrl = String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
+  const token = process.env.SITE_REALTIME_TOKEN || process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
+
+  if (!siteUrl || !token) return;
+
+  try {
+    await fetch(`${siteUrl}/internal/realtime/broadcast`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-site-realtime-token': token,
+        'x-bot-api-key': token
+      },
+      body: JSON.stringify({
+        type,
+        payload,
+        source: 'bot',
+        createdAt: new Date().toISOString()
+      })
+    });
+  } catch (error) {
+    console.error('⚠️ Não consegui avisar o site em tempo real:', error.message);
+  }
+}
+
 const RESPONSIBLE_NAME_ID = 'responsibleName';
 const PAYMENT_FILE_ID = 'paymentProofFile';
 
@@ -242,13 +268,15 @@ async function handleValidationSubmit(client, interaction, rawInteraction) {
 
   const proofLog = await publishProofForVerification(client, interaction, requestWithResponsible, proofFile);
 
-  await storage.submitEventRegistrationProof(requestId, {
+  const submittedRequest = await storage.submitEventRegistrationProof(requestId, {
     responsibleName,
     paymentProof: proofLog.paymentProofFile?.url || proofFile.url,
     paymentProofFile: proofLog.paymentProofFile,
     validationDiscordChannelId: proofLog.channelId,
     validationDiscordMessageId: proofLog.messageId
   });
+
+  await notifySiteRealtime('event-registration:proof-submitted', { requestId, eventId: submittedRequest.eventId, teamId: submittedRequest.teamId });
 
   await interaction.editReply('✅ Comprovante enviado para o histórico. Aguarde a staff clicar em **Verificado** para liberar o time no evento.');
 }
@@ -265,6 +293,8 @@ async function handleVerify(interaction) {
   const result = await storage.approveEventRegistrationRequest(requestId, {
     approvedBy: interaction.user.id
   });
+
+  await notifySiteRealtime('event-registration:approved', { requestId, eventId: result.request.eventId, teamId: result.request.teamId });
 
   await interaction.editReply(`✅ Inscrição verificada. O time **${result.request.teamName || result.request.teamId}** foi aceito no evento do site.`);
 

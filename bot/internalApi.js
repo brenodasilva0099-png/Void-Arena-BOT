@@ -59,6 +59,8 @@ const STORAGE_METHODS = new Set([
   'addTrainingSubmissionComment',
   'saveTrainingSubmission',
   'readTrainingSubmissions',
+  'writeRolePermissions',
+  'readRolePermissions',
   'rejectEventRegistrationRequest',
   'approveEventRegistrationRequest',
   'attachValidationMessageToRegistrationRequest',
@@ -725,6 +727,35 @@ async function createEventValidationRequest(client, payload = {}) {
 }
 
 
+
+async function getDiscordMemberRoles(client, discordId = '') {
+  const safeDiscordId = String(discordId || '').trim();
+  if (!safeDiscordId || !client?.guilds?.cache?.size) {
+    return { success: true, roles: [] };
+  }
+
+  const roles = [];
+
+  for (const guild of client.guilds.cache.values()) {
+    const member = await guild.members.fetch(safeDiscordId).catch(() => null);
+    if (!member) continue;
+
+    member.roles.cache
+      .filter((role) => role.id !== guild.id)
+      .forEach((role) => {
+        roles.push({
+          id: role.id,
+          name: role.name,
+          guildId: guild.id,
+          guildName: guild.name
+        });
+      });
+  }
+
+  return { success: true, roles };
+}
+
+
 function startInternalApi({ client, port = 3002 } = {}) {
   const app = express();
   app.use(express.json({ limit: '25mb' }));
@@ -842,6 +873,12 @@ function startInternalApi({ client, port = 3002 } = {}) {
   app.get('/internal/event-registration-requests', async (_req, res) => {
     const requests = await storage.readEventRegistrationRequests({ limit: 500 });
     return res.json({ success: true, requests });
+  });
+
+
+  app.get('/internal/discord/member-roles/:discordId', async (req, res) => {
+    const data = await getDiscordMemberRoles(client, req.params.discordId);
+    return res.json(data);
   });
 
   app.get('/internal/health', async (_req, res) => {

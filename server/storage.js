@@ -46,7 +46,8 @@ const EMPTY_DATABASE = {
   teamChats: [],
   events: [],
   trainingSubmissions: [],
-  eventRegistrationRequests: []
+  eventRegistrationRequests: [],
+  rolePermissions: {}
 };
 
 
@@ -397,6 +398,35 @@ function normalizePlayerApplication(raw = {}) {
 }
 
 
+
+const ROLE_PERMISSION_KEYS = [
+  'forms',
+  'events',
+  'matches',
+  'stats',
+  'bracket',
+  'teams',
+  'backup',
+  'config'
+];
+
+function normalizeRolePermissions(raw = {}) {
+  const output = {};
+
+  Object.entries(raw && typeof raw === 'object' ? raw : {}).forEach(([roleId, permissions]) => {
+    const safeRoleId = String(roleId || '').trim();
+    if (!safeRoleId) return;
+
+    output[safeRoleId] = {};
+    ROLE_PERMISSION_KEYS.forEach((key) => {
+      output[safeRoleId][key] = Boolean(permissions?.[key]);
+    });
+  });
+
+  return output;
+}
+
+
 function normalizeDatabase(raw = {}) {
   const now = new Date().toISOString();
   const db = clone(EMPTY_DATABASE);
@@ -439,6 +469,7 @@ function normalizeDatabase(raw = {}) {
   db.eventRegistrationRequests = Array.isArray(raw.eventRegistrationRequests)
     ? raw.eventRegistrationRequests.map(normalizeEventRegistrationRequest).slice(-1000)
     : [];
+  db.rolePermissions = normalizeRolePermissions(raw.rolePermissions || raw.settings?.rolePermissions || {});
 
   return db;
 }
@@ -555,6 +586,7 @@ async function readDatabaseStatus() {
     users: db.users.length,
     teams: db.teams.length,
     messages: Array.isArray(db.messages) ? db.messages.length : 0,
+    rolePermissionRoles: db.rolePermissions && typeof db.rolePermissions === 'object' ? Object.keys(db.rolePermissions).length : 0,
     messageArchives: Array.isArray(db.messageArchives) ? db.messageArchives.length : 0,
     teamChats: Array.isArray(db.teamChats) ? db.teamChats.length : 0,
     events: Array.isArray(db.events) ? db.events.length : 0,
@@ -1441,6 +1473,24 @@ async function addTrainingSubmissionComment(id, comment = {}) {
 
 
 
+
+async function readRolePermissions() {
+  const db = await readDatabase();
+  return normalizeRolePermissions(db.rolePermissions || {});
+}
+
+async function writeRolePermissions(payload = {}) {
+  const normalized = normalizeRolePermissions(payload);
+
+  return updateDatabase((db) => {
+    db.rolePermissions = normalized;
+    db.settings = db.settings && typeof db.settings === 'object' ? db.settings : {};
+    db.settings.rolePermissions = normalized;
+    return normalized;
+  });
+}
+
+
 function summarizeDatabase(db = {}) {
   return {
     users: Array.isArray(db.users) ? db.users.length : 0,
@@ -1448,6 +1498,7 @@ function summarizeDatabase(db = {}) {
     events: Array.isArray(db.events) ? db.events.length : 0,
     trainingSubmissions: Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions.length : 0,
     messages: Array.isArray(db.messages) ? db.messages.length : 0,
+    rolePermissionRoles: db.rolePermissions && typeof db.rolePermissions === 'object' ? Object.keys(db.rolePermissions).length : 0,
     messageArchives: Array.isArray(db.messageArchives) ? db.messageArchives.length : 0,
     teamChats: Array.isArray(db.teamChats) ? db.teamChats.length : 0,
     bracketSlots: Array.isArray(db.bracket?.slots) ? db.bracket.slots.filter(Boolean).length : 0,
@@ -1625,6 +1676,8 @@ async function updatePlayerApplicationStatus(id, updates = {}) {
 
 
 module.exports = {
+  writeRolePermissions,
+  readRolePermissions,
   submitEventRegistrationProof,
   rejectEventRegistrationRequest,
   approveEventRegistrationRequest,
