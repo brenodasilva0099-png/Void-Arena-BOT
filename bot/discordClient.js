@@ -10,6 +10,7 @@ const { registerBackupManager } = require('./backupManager');
 const { registerControlPanel } = require('./controlPanel');
 const { registerEventValidation } = require('./eventValidation');
 const { registerPlayerApplications } = require('./playerApplications');
+const { registerMatchResultHandlers } = require('./matchResults');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
@@ -105,6 +106,7 @@ function registerDiscordHandlers(client) {
   registerControlPanel(client);
   registerEventValidation(client);
   registerPlayerApplications(client);
+  registerMatchResultHandlers(client);
 
   client.once(Events.ClientReady, (readyClient) => {
     console.log(`✅ Bot online como ${readyClient.user.tag}`);

@@ -4,6 +4,7 @@ const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder 
 const { extractDiscordMessageAttachments } = require('./discordClient');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
+const { syncResultHubsForBracket } = require('./matchResults');
 const {
   readChatMessages,
   saveChatMessage
@@ -804,6 +805,15 @@ function startInternalApi({ client, port = 3002 } = {}) {
 
   app.use(requireInternalToken);
 
+
+  app.post('/internal/results/sync-hubs', async (req, res) => {
+    try {
+      const result = await syncResultHubsForBracket(client, req.body || {});
+      return res.json(result);
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
 
   app.get('/internal/training-submissions/:id/video', async (req, res) => {
     try {
