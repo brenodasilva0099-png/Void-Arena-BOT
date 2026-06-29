@@ -41,7 +41,12 @@ const IDS = {
   backups: 'control:backups',
   backupSelect: 'control:backup-select',
   forms: 'control:forms',
-  training: 'control:training'
+  training: 'control:training',
+  results: 'control:results',
+  permissions: 'control:permissions',
+  permissionRole: 'control:permission-role',
+  permissionSetPrefix: 'control:permission-set:',
+  permissionClearPrefix: 'control:permission-clear:'
 };
 
 function envRoleIds(...names) {
@@ -76,6 +81,52 @@ function formatDate(value) {
   } catch {
     return String(value);
   }
+}
+
+const PERMISSION_LABELS = {
+  forms: 'FormulÃ¡rios',
+  events: 'Eventos',
+  matches: 'AnÃ¡lise',
+  stats: 'EstatÃ­sticas',
+  bracket: 'Chaveamento',
+  teams: 'Times',
+  backup: 'Backup',
+  config: 'Config'
+};
+
+function permissionOptions(current = {}) {
+  return Object.entries(PERMISSION_LABELS).map(([key, label]) => ({
+    label,
+    value: key,
+    description: current[key] ? 'Ativado para esse cargo' : 'Desativado para esse cargo',
+    default: Boolean(current[key])
+  }));
+}
+
+async function permissionRoleComponents(roleId = '') {
+  const all = await storage.readRolePermissions().catch(() => ({}));
+  const current = all[roleId] || {};
+  return [
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`${IDS.permissionSetPrefix}${roleId}`)
+        .setPlaceholder('Escolha as permissÃµes desse cargo')
+        .setMinValues(1)
+        .setMaxValues(Object.keys(PERMISSION_LABELS).length)
+        .addOptions(permissionOptions(current))
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${IDS.permissionClearPrefix}${roleId}`)
+        .setLabel('Limpar permissÃµes desse cargo')
+        .setEmoji('ðŸ§¹')
+        .setStyle(ButtonStyle.Danger)
+    )
+  ];
+}
+
+function permissionsRolePickerComponents() {
+  return [new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId(IDS.permissionRole).setPlaceholder('Escolha um cargo para configurar').setMinValues(1).setMaxValues(1))];
 }
 
 function statusLine(status = {}) {
