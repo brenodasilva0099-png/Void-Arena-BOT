@@ -10,13 +10,36 @@ const {
 
 const storage = require('../server/storage');
 
-// Void Arena 5.0.2: HUBs com encoding UTF-8 limpo e emoji válido.
+// Void Arena 5.0.3: uma HUB interativa por confronto, série MD1/MD3/MD5 e avanço só ao fechar a série.
 const DEFAULT_RESULTS_CHANNEL_ID = '1521257495727706234';
 const OPEN_PREFIX = 'result:open:';
 const SUBMIT_PREFIX = 'result:submit:';
 
 function resultsChannelId(payload = {}) {
   return String(payload.resultsChannelId || process.env.RESULTS_CHANNEL_ID || DEFAULT_RESULTS_CHANNEL_ID).trim();
+}
+
+function siteUrl() {
+  return String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
+}
+
+function siteToken() {
+  return process.env.SITE_REALTIME_TOKEN || process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
+}
+
+async function callSite(pathname, payload = {}) {
+  const token = siteToken();
+  const response = await fetch(`${siteUrl()}${pathname}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { 'x-site-realtime-token': token, 'x-bot-api-key': token, 'x-internal-token': token } : {})
+    },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) throw new Error(data.message || `Site recusou (${response.status})`);
+  return data;
 }
 
 function roundKey(value = '') {
@@ -30,7 +53,17 @@ function roundLabel(key = '') {
 
 function maxGames(format = 'MD1') {
   const found = String(format || '').match(/MD(\d+)/i);
-  return found ? Number(found[1]) || 1 : 1;
+  const number = found ? Number(found[1]) || 1 : 1;
+  return Math.max(1, Math.min(9, number));
+}
+
+function winsNeeded(bestOf = 1) {
+  return Math.floor(Number(bestOf || 1) / 2) + 1;
+}
+
+function clampGameNumber(value, bestOf = 1) {
+  const number = Math.floor(Number(value || 1));
+  return Math.max(1, Math.min(maxGames(`MD${bestOf}`), Number.isFinite(number) ? number : 1));
 }
 
 function teamIdOf(item) {
@@ -85,6 +118,10 @@ function hubKey(match = {}) {
   return `${match.roundKey}_${match.matchIndex}_${match.teamA?.id || 'a'}_${match.teamB?.id || 'b'}`;
 }
 
+function hubId(match = {}) {
+  return `${match.roundKey}_${match.matchIndex}`;
+}
+
 function matchesFromBracket({ bracket = {}, teams = [], settings = {}, users = [] } = {}) {
   const byId = new Map(teams.map((team) => { const safe = safeTeam(team); return [safe.id, safe]; }));
   const format = settings.matchFormat || 'MD1';
@@ -97,6 +134,7 @@ function matchesFromBracket({ bracket = {}, teams = [], settings = {}, users = [
       const teamB = byId.get(teamIdOf(arr[i + 1]));
       if (!teamA || !teamB) continue;
       const matchIndex = Math.floor(i / 2);
+      const bestOf = maxGames(format);
       const match = {
         hubId: `${def.key}_${matchIndex}`,
         roundKey: def.key,
@@ -104,7 +142,8 @@ function matchesFromBracket({ bracket = {}, teams = [], settings = {}, users = [
         matchIndex,
         matchNumber: matchIndex + 1,
         matchFormat: format,
-        maxGames: maxGames(format),
+        maxGames: bestOf,
+        winsNeeded: winsNeeded(bestOf),
         teamA,
         teamB,
         captainDiscordIds: unique([...teamDiscordIds(teamA, users), ...teamDiscordIds(teamB, users)])
@@ -131,25 +170,88 @@ function canUse(member, match) {
   return isStaff(member) || (match.captainDiscordIds || []).includes(member?.id);
 }
 
-function embedFor(match) {
+function safeNumber(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function seriesState(match = {}, result = null) {
+  const bestOf = safeNumber(result?.bestOf || match.maxGames, match.maxGames || 1);
+  const needed = safeNumber(result?.winsNeeded || winsNeeded(bestOf), winsNeeded(bestOf));
+  const scoreA = safeNumber(result?.seriesScoreA ?? result?.finalScoreA, 0);
+  const scoreB = safeNumber(result?.seriesScoreB ?? result?.finalScoreB, 0);
+  const played = safeNumber(result?.playedGames, 0);
+  const current = clampGameNumber(result?.currentGameNumber || played + 1, bestOf);
+  const possibleRemaining = Math.max(0, bestOf - played);
+  const winsRemaining = Math.max(0, needed - Math.max(scoreA, scoreB));
+  const status = String(result?.status || 'pending');
+  return { bestOf, needed, scoreA, scoreB, played, current, possibleRemaining, winsRemaining, status };
+}
+
+function gameHistoryText(match = {}, result = null) {
+  const games = Array.isArray(result?.games) ? result.games.slice().sort((a, b) => Number(a.gameNumber) - Number(b.gameNumber)) : [];
+  if (!games.length) return 'Nenhuma partida enviada ainda.';
+  return games.slice(0, 5).map((game) => {
+    const status = game.status === 'validated' ? 'validada' : game.status === 'conflict' ? 'conflito' : 'aguardando';
+    const score = game.finalScoreA !== null && game.finalScoreA !== undefined
+      ? `${game.finalScoreA} x ${game.finalScoreB}`
+      : game.submissions?.[0]
+        ? `${game.submissions[0].scoreA} x ${game.submissions[0].scoreB}`
+        : 'sem placar';
+    return `Jogo ${game.gameNumber}: ${score} (${status})`;
+  }).join('\n');
+}
+
+async function fetchResultState(match) {
+  try {
+    const data = await callSite('/internal/results/state', { hubId: hubId(match), match });
+    return data.result || null;
+  } catch {
+    return null;
+  }
+}
+
+async function embedFor(match, resultOverride = null) {
+  const result = resultOverride || await fetchResultState(match);
+  const state = seriesState(match, result);
+  const titleStatus = state.status === 'validated' ? 'Série finalizada' : state.status === 'conflict' ? 'Conflito pendente' : state.played > 0 ? 'Série em andamento' : 'Aguardando resultado';
+  const currentLine = state.status === 'validated'
+    ? 'Série concluída. O vencedor já pode avançar no chaveamento.'
+    : `Partida atual: **Jogo ${state.current} de ${state.bestOf}**`;
+
   return new EmbedBuilder()
-    .setTitle('🏆 Resultado da Partida')
-    .setColor(0x8b5cf6)
+    .setTitle('Resultado da Partida')
+    .setColor(state.status === 'validated' ? 0x22c55e : state.status === 'conflict' ? 0xef4444 : 0x8b5cf6)
     .setDescription([
       `**${match.teamA.name}** vs **${match.teamB.name}**`, '',
       `**Rodada:** ${match.roundLabel} ${match.matchNumber}`,
-      `**Formato:** ${match.matchFormat}`,
-      `**Partidas jogadas:** 0/${match.maxGames}`,
-      `**Partidas faltando:** ${match.maxGames}`, '',
-      'Clique em **Enviar resultado** para mandar a print e o placar.'
+      `**Formato:** ${match.matchFormat} • melhor de ${state.bestOf} • vence com ${state.needed} vitória(s)`,
+      `**Placar da série:** ${match.teamA.name} **${state.scoreA}** x **${state.scoreB}** ${match.teamB.name}`,
+      `**Status:** ${titleStatus}`,
+      `**${currentLine}**`,
+      `**Partidas concluídas:** ${state.played}/${state.bestOf}`,
+      `**Partidas possíveis restantes:** ${state.possibleRemaining}`,
+      `**Vitórias faltando para fechar:** ${state.winsRemaining}`
     ].join('\n'))
-    .addFields({ name: 'Capitães autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.' })
-    .setFooter({ text: `Void Arena • Resultados oficiais • ${match.hubKey}` })
+    .addFields(
+      { name: 'Histórico', value: gameHistoryText(match, result).slice(0, 1024) },
+      { name: 'Capitães autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.' }
+    )
+    .setFooter({ text: `Void Arena • HUB única • ${match.hubKey}` })
     .setTimestamp(new Date());
 }
+
 function hubComponents(match) {
-  return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`${OPEN_PREFIX}${match.roundKey}:${match.matchIndex}`).setLabel('Enviar resultado').setEmoji('📤').setStyle(ButtonStyle.Primary))];
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${OPEN_PREFIX}${match.roundKey}:${match.matchIndex}`)
+        .setLabel('Enviar / atualizar partida')
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
 }
+
 async function findExistingHub(channel, match) {
   if (!channel?.messages?.fetch) return null;
   const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
@@ -159,11 +261,12 @@ async function findExistingHub(channel, match) {
     return Array.from(message.embeds || []).some((embed) => String(embed.footer?.text || '').includes(match.hubKey));
   }) || null;
 }
-async function sendOrUpdateHub(client, match, payload = {}) {
+
+async function sendOrUpdateHub(client, match, payload = {}, resultOverride = null) {
   const channelId = resultsChannelId(payload);
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel?.send) throw new Error(`Canal de resultados inválido: ${channelId}`);
-  const messagePayload = { embeds: [embedFor(match)], components: hubComponents(match), allowedMentions: { users: match.captainDiscordIds || [] } };
+  const messagePayload = { embeds: [await embedFor(match, resultOverride)], components: hubComponents(match), allowedMentions: { users: match.captainDiscordIds || [] } };
   const existing = await findExistingHub(channel, match);
   if (existing?.editable) {
     const edited = await existing.edit(messagePayload);
@@ -172,6 +275,7 @@ async function sendOrUpdateHub(client, match, payload = {}) {
   const sent = await channel.send(messagePayload);
   return { ...match, created: true, discordChannelId: sent.channelId, discordMessageId: sent.id };
 }
+
 async function syncResultHubsForBracket(client, payload = {}) {
   const bracket = payload.bracket || await storage.readBracket();
   const teams = Array.isArray(payload.teams) ? payload.teams : await storage.readTeams();
@@ -203,32 +307,64 @@ function upload(raw, id) {
   }
   return null;
 }
+
 async function showModal(interaction, match) {
-  await interaction.client.rest.post(Routes.interactionCallback(interaction.id, interaction.token), { body: { type: 9, data: { custom_id: `${SUBMIT_PREFIX}${match.roundKey}:${match.matchIndex}`, title: 'Enviar resultado', components: [
-    { type: 18, label: 'Print do resultado', description: 'Envie a print/comprovante da partida.', component: { type: 19, custom_id: 'proof', min_values: 1, max_values: 1, required: true } },
+  const state = seriesState(match, await fetchResultState(match));
+  await interaction.client.rest.post(Routes.interactionCallback(interaction.id, interaction.token), { body: { type: 9, data: { custom_id: `${SUBMIT_PREFIX}${match.roundKey}:${match.matchIndex}`, title: 'Atualizar partida', components: [
+    { type: 18, label: 'Print do resultado', description: 'Envie a print/comprovante desta partida.', component: { type: 19, custom_id: 'proof', min_values: 1, max_values: 1, required: true } },
+    { type: 18, label: 'Número da partida na série', description: `Atual: jogo ${state.current} de ${state.bestOf}`, component: { type: 4, custom_id: 'gameNumber', style: 1, min_length: 1, max_length: 2, required: true, value: String(state.current), placeholder: String(state.current) } },
     { type: 18, label: `Gols ${match.teamA.tag || match.teamA.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreA', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } },
-    { type: 18, label: `Gols ${match.teamB.tag || match.teamB.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreB', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } },
-    { type: 18, label: 'Partidas já jogadas', component: { type: 4, custom_id: 'played', style: 1, min_length: 1, max_length: 3, required: true, placeholder: String(match.maxGames || 1) } },
-    { type: 18, label: 'Partidas faltando', component: { type: 4, custom_id: 'remaining', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } }
+    { type: 18, label: `Gols ${match.teamB.tag || match.teamB.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreB', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } }
   ] } } });
 }
+
 async function currentMatch(round, index) {
   const [bracket, teams, users, settings] = await Promise.all([storage.readBracket(), storage.readTeams(), storage.readUsers(), storage.readTournamentSettings().catch(() => ({}))]);
   return matchesFromBracket({ bracket, teams, users, settings }).find((match) => match.roundKey === round && match.matchIndex === index);
 }
+
+async function updateHubAfterSubmit(client, match, result) {
+  try {
+    await sendOrUpdateHub(client, match, {}, result);
+  } catch (error) {
+    console.error('Erro ao atualizar HUB após envio:', error);
+  }
+}
+
 async function submitToSite(interaction, raw, match) {
   await interaction.deferReply({ ephemeral: true });
   const proof = upload(raw, 'proof');
-  if (!proof?.url) return interaction.editReply('❌ Não achei a print enviada.');
-  const payload = { roundKey: match.roundKey, matchIndex: match.matchIndex, match, scoreA: Number(readModal(raw, 'scoreA')), scoreB: Number(readModal(raw, 'scoreB')), playedGames: Number(readModal(raw, 'played')), remainingGames: Number(readModal(raw, 'remaining')), proof, authorDiscordId: interaction.user.id, authorName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username, isStaff: isStaff(interaction.member), createdAt: new Date().toISOString() };
-  if (![payload.scoreA, payload.scoreB, payload.playedGames, payload.remainingGames].every(Number.isFinite)) return interaction.editReply('❌ Preencha os números corretamente.');
-  const siteUrl = String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
-  const token = process.env.SITE_REALTIME_TOKEN || process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
-  const response = await fetch(`${siteUrl}/internal/results/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-site-realtime-token': token, 'x-bot-api-key': token, 'x-internal-token': token }, body: JSON.stringify(payload) });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data.success === false) throw new Error(data.message || `Site recusou (${response.status})`);
-  const msg = data.result?.status === 'validated' ? '✅ Resultado validado e chaveamento atualizado no site.' : data.result?.status === 'conflict' ? '⚠️ Resultado salvo, mas deu conflito. Staff precisa resolver.' : '✅ Resultado salvo. Aguardando confirmação do outro capitão.';
-  return interaction.editReply(msg);
+  if (!proof?.url) return interaction.editReply('Não achei a print enviada.');
+
+  const gameNumber = Number(readModal(raw, 'gameNumber'));
+  const payload = {
+    roundKey: match.roundKey,
+    matchIndex: match.matchIndex,
+    match,
+    gameNumber,
+    scoreA: Number(readModal(raw, 'scoreA')),
+    scoreB: Number(readModal(raw, 'scoreB')),
+    proof,
+    authorDiscordId: interaction.user.id,
+    authorName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username,
+    isStaff: isStaff(interaction.member),
+    createdAt: new Date().toISOString()
+  };
+  if (![payload.gameNumber, payload.scoreA, payload.scoreB].every(Number.isFinite)) return interaction.editReply('Preencha os números corretamente.');
+  if (payload.scoreA === payload.scoreB) return interaction.editReply('Resultado empatado não fecha uma partida. Informe o placar vencedor.');
+
+  const data = await callSite('/internal/results/submit', payload);
+  await updateHubAfterSubmit(interaction.client, match, data.result || null);
+
+  const result = data.result || {};
+  const message = result.status === 'validated'
+    ? 'Série finalizada, resultado validado e chaveamento atualizado no site.'
+    : result.status === 'conflict'
+      ? 'Resultado salvo, mas deu conflito nesta partida. Staff precisa resolver.'
+      : result.status === 'partial'
+        ? `Partida salva. Série: ${result.seriesScoreA || 0} x ${result.seriesScoreB || 0}. Próximo jogo: ${result.currentGameNumber || '?'} de ${result.bestOf || match.maxGames}.`
+        : 'Resultado salvo. Aguardando confirmação do outro capitão.';
+  return interaction.editReply(message);
 }
 
 function registerMatchResultHandlers(client) {
@@ -241,17 +377,17 @@ function registerMatchResultHandlers(client) {
       if (!message.guild || message.author.bot) return;
       const text = String(message.content || '').trim();
       if (!text.startsWith('.resultado-hub') && text !== '.resultados-sync') return;
-      if (!isStaff(message.member)) return message.reply('❌ Apenas staff pode usar esse comando.');
+      if (!isStaff(message.member)) return message.reply('Apenas staff pode usar esse comando.');
       if (text === '.resultados-sync') {
         const result = await syncResultHubsForBracket(message.client);
-        return message.reply(`✅ HUBs sincronizadas: ${result.created} criadas, ${result.reused} atualizadas, ${result.totalMatches} confronto(s)${result.errors?.length ? ` • ${result.errors.length} erro(s)` : ''}.`);
+        return message.reply(`HUBs sincronizadas: ${result.created} criadas, ${result.reused} atualizadas, ${result.totalMatches} confronto(s)${result.errors?.length ? ` • ${result.errors.length} erro(s)` : ''}.`);
       }
       const [, roundArg = 'slots', numArg = '1'] = text.split(/\s+/);
       const match = await currentMatch(roundKey(roundArg), Math.max(0, Number(numArg || 1) - 1));
-      if (!match) return message.reply('❌ Não achei esse confronto completo no chaveamento.');
+      if (!match) return message.reply('Não achei esse confronto completo no chaveamento.');
       const hub = await sendOrUpdateHub(message.client, match);
-      return message.reply(`${hub.reused ? '🔄 HUB atualizada' : '✅ HUB criada'} para **${match.teamA.name} vs ${match.teamB.name}**.`);
-    } catch (error) { console.error('Erro resultados:', error); return message.reply(`❌ Erro: ${error.message}`).catch(() => {}); }
+      return message.reply(`${hub.reused ? 'HUB atualizada' : 'HUB criada'} para **${match.teamA.name} vs ${match.teamB.name}**.`);
+    } catch (error) { console.error('Erro resultados:', error); return message.reply(`Erro: ${error.message}`).catch(() => {}); }
   });
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
@@ -259,21 +395,21 @@ function registerMatchResultHandlers(client) {
       if (interaction.isButton?.() && id.startsWith(OPEN_PREFIX)) {
         const [round, idx] = id.slice(OPEN_PREFIX.length).split(':');
         const match = await currentMatch(round, Number(idx));
-        if (!match) return interaction.reply({ content: '❌ Confronto não encontrado.', ephemeral: true });
-        if (!canUse(interaction.member, match)) return interaction.reply({ content: '❌ Apenas capitães desses times ou staff podem enviar.', ephemeral: true });
+        if (!match) return interaction.reply({ content: 'Confronto não encontrado.', ephemeral: true });
+        if (!canUse(interaction.member, match)) return interaction.reply({ content: 'Apenas capitães desses times ou staff podem enviar.', ephemeral: true });
         return showModal(interaction, match);
       }
       if (interaction.isModalSubmit?.() && id.startsWith(SUBMIT_PREFIX)) {
         const [round, idx] = id.slice(SUBMIT_PREFIX.length).split(':');
         const match = await currentMatch(round, Number(idx));
-        if (!match) return interaction.reply({ content: '❌ Confronto não encontrado.', ephemeral: true });
-        if (!canUse(interaction.member, match)) return interaction.reply({ content: '❌ Apenas capitães desses times ou staff podem enviar.', ephemeral: true });
+        if (!match) return interaction.reply({ content: 'Confronto não encontrado.', ephemeral: true });
+        if (!canUse(interaction.member, match)) return interaction.reply({ content: 'Apenas capitães desses times ou staff podem enviar.', ephemeral: true });
         return submitToSite(interaction, rawMap.get(interaction.id), match);
       }
     } catch (error) {
       console.error('Erro interação resultado:', error);
-      if (interaction.deferred || interaction.replied) return interaction.editReply(`❌ Erro: ${error.message}`).catch(() => {});
-      return interaction.reply({ content: `❌ Erro: ${error.message}`, ephemeral: true }).catch(() => {});
+      if (interaction.deferred || interaction.replied) return interaction.editReply(`Erro: ${error.message}`).catch(() => {});
+      return interaction.reply({ content: `Erro: ${error.message}`, ephemeral: true }).catch(() => {});
     }
   });
   return client;

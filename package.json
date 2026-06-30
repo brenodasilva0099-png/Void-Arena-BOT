@@ -1,6 +1,6 @@
 {
   "name": "void-arena-bot",
-  "version": "5.0.2",
+  "version": "5.0.3",
   "description": "Void Arena bot 5.0.2: HUBs de resultados corrigidas, emojis válidos e painel conectado à estrutura modular.",
   "main": "bot/index.js",
   "scripts": {

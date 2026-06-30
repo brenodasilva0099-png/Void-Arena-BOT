@@ -20,3 +20,9 @@ Esta versão estabiliza o BOT para acompanhar o SITE 5.0.
 ## Próxima etapa
 
 Mover o painel para arquivos menores dentro de `bot/panels/` sem alterar comportamento.
+
+## 5.0.3
+- HUB única por confronto.
+- Série MD1/MD3/MD5 com placar por jogo.
+- Avanço no chaveamento apenas quando a série fecha.
+- Resultados aparecem no site com histórico por partida.
