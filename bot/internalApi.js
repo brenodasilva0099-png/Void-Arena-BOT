@@ -165,56 +165,53 @@ async function listDiscordChannels(client) {
 }
 
 async function listDiscordMentions(client) {
-  if (!client?.guilds?.cache) return { success: true, members: [], roles: [], message: 'Bot ainda não está online.' };
+  if (!client) return { success: true, members: [], roles: [], message: 'Bot ainda não inicializou.' };
 
-  const guilds = Array.from(client.guilds.cache.values());
+  let guilds = [];
+  try {
+    guilds = Array.from(client.guilds?.cache?.values?.() || []);
+    if (!guilds.length && client.guilds?.fetch) {
+      const fetchedGuilds = await client.guilds.fetch();
+      guilds = Array.from(fetchedGuilds.values()).map((guild) => guild.id ? guild : null).filter(Boolean);
+    }
+  } catch {}
+
   const members = [];
   const roles = [];
 
-  for (const guild of guilds) {
+  for (const partialGuild of guilds) {
+    let guild = partialGuild;
+    try {
+      if (partialGuild?.fetch) guild = await partialGuild.fetch();
+      else if (partialGuild?.id && client.guilds?.fetch) guild = await client.guilds.fetch(partialGuild.id);
+    } catch {}
+    if (!guild?.id) continue;
+
     try {
       const fetchedRoles = await guild.roles.fetch();
       const roleList = Array.from((fetchedRoles || guild.roles.cache).values())
         .filter((role) => role && role.id !== guild.id && !role.managed)
         .sort((a, b) => (b.position || 0) - (a.position || 0))
-        .slice(0, 80);
-
-      roleList.forEach((role) => {
-        roles.push({
-          id: role.id,
-          name: role.name,
-          guildId: guild.id,
-          guildName: guild.name,
-          mention: `<@&${role.id}>`
-        });
-      });
-    } catch {}
+        .slice(0, 100);
+      roleList.forEach((role) => roles.push({ id: role.id, name: role.name, guildId: guild.id, guildName: guild.name, mention: `<@&${role.id}>` }));
+    } catch (error) {
+      console.error('Erro ao buscar cargos:', error.message);
+    }
 
     try {
-      let memberCollection = guild.members.cache;
+      let memberCollection = guild.members?.cache;
       try {
         const fetchedMembers = await guild.members.fetch({ limit: 100 });
         if (fetchedMembers) memberCollection = fetchedMembers;
       } catch {}
-
-      Array.from(memberCollection.values())
+      Array.from(memberCollection?.values?.() || [])
         .filter((member) => member?.user && !member.user.bot)
         .slice(0, 100)
-        .forEach((member) => {
-          members.push({
-            id: member.user.id,
-            name: member.displayName || member.user.globalName || member.user.username,
-            username: member.user.username,
-            guildId: guild.id,
-            guildName: guild.name,
-            avatar: member.user.displayAvatarURL?.({ size: 64 }) || '',
-            mention: `<@${member.user.id}>`
-          });
-        });
+        .forEach((member) => members.push({ id: member.user.id, name: member.displayName || member.user.globalName || member.user.username, username: member.user.username, guildId: guild.id, guildName: guild.name, avatar: member.user.displayAvatarURL?.({ size: 64 }) || '', mention: `<@${member.user.id}>` }));
     } catch {}
   }
 
-  return { success: true, members, roles };
+  return { success: true, members, roles, message: roles.length ? '' : 'Nenhum cargo encontrado. Verifique se o bot está no servidor correto e se já terminou de iniciar.' };
 }
 
 async function sendDiscordMessage(client, { discordChannelId, content, allowedMentions } = {}) {

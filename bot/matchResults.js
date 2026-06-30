@@ -228,18 +228,18 @@ async function embedFor(match, resultOverride = null) {
   const lastProof = result?.proof?.url || result?.proof?.proxyUrl || '';
 
   return new EmbedBuilder()
-    .setTitle(`🏆 ${match.teamA.name} vs ${match.teamB.name}`)
+    .setTitle(`🎮 Resultado • ${match.teamA.name} x ${match.teamB.name}`)
     .setColor(state.status === 'validated' ? 0x22c55e : state.status === 'conflict' ? 0xef4444 : 0x8b5cf6)
     .setDescription([
-      `📍 **${match.roundLabel} ${match.matchNumber}** • ${match.matchFormat}`,
-      `⚽ **Série:** ${match.teamA.name} **${state.scoreA}** x **${state.scoreB}** ${match.teamB.name}`,
+      `🏁 **${match.roundLabel} ${match.matchNumber}**  •  **${match.matchFormat}**`,
+      `📊 **Série:** ${match.teamA.name} **${state.scoreA}** x **${state.scoreB}** ${match.teamB.name}`,
       `${currentLine}`,
-      `📊 **Status:** ${statusLabel}`
+      `${statusLabel}`
     ].join('\n'))
     .addFields(
-      { name: '📌 Progresso', value: [`Concluídas: **${state.played}/${state.bestOf}**`, `Restantes possíveis: **${state.possibleRemaining}**`, `Vitórias para fechar: **${state.winsRemaining}**`].join(' • '), inline: false },
+      { name: '📌 Resumo', value: [`Jogos: **${state.played}/${state.bestOf}**`, `Restam: **${state.possibleRemaining}**`, `Faltam p/ fechar: **${state.winsRemaining}**`].join('  •  '), inline: false },
       { name: '🧾 Histórico', value: gameHistoryText(match, result).slice(0, 900), inline: false },
-      { name: '👑 Capitães', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.', inline: false }
+      { name: '👑 Capitães autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.', inline: false }
     )
     .setFooter({ text: `Void Arena • HUB única • ${match.hubKey}${lastProof ? ' • print anexada' : ''}` })
     .setTimestamp(new Date());
