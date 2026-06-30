@@ -1,7 +1,7 @@
 {
   "name": "void-arena-bot",
-  "version": "5.0.1",
-  "description": "Void Arena bot 5.0.1: painel, HUBs de resultado, permissões e backups prontos para o site modular.",
+  "version": "5.0.2",
+  "description": "Void Arena bot 5.0.2: HUBs de resultados corrigidas, emojis válidos e painel conectado à estrutura modular.",
   "main": "bot/index.js",
   "scripts": {
     "start": "node bot/index.js",

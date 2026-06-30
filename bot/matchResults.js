@@ -10,6 +10,7 @@ const {
 
 const storage = require('../server/storage');
 
+// Void Arena 5.0.2: HUBs com encoding UTF-8 limpo e emoji válido.
 const DEFAULT_RESULTS_CHANNEL_ID = '1521257495727706234';
 const OPEN_PREFIX = 'result:open:';
 const SUBMIT_PREFIX = 'result:submit:';
@@ -132,7 +133,7 @@ function canUse(member, match) {
 
 function embedFor(match) {
   return new EmbedBuilder()
-    .setTitle('ðŸ† Resultado da Partida')
+    .setTitle('🏆 Resultado da Partida')
     .setColor(0x8b5cf6)
     .setDescription([
       `**${match.teamA.name}** vs **${match.teamB.name}**`, '',
@@ -142,12 +143,12 @@ function embedFor(match) {
       `**Partidas faltando:** ${match.maxGames}`, '',
       'Clique em **Enviar resultado** para mandar a print e o placar.'
     ].join('\n'))
-    .addFields({ name: 'CapitÃ£es autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitÃ£o vinculado. Staff pode enviar.' })
-    .setFooter({ text: `Void Arena â€¢ Resultados oficiais â€¢ ${match.hubKey}` })
+    .addFields({ name: 'Capitães autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.' })
+    .setFooter({ text: `Void Arena • Resultados oficiais • ${match.hubKey}` })
     .setTimestamp(new Date());
 }
 function hubComponents(match) {
-  return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`${OPEN_PREFIX}${match.roundKey}:${match.matchIndex}`).setLabel('Enviar resultado').setEmoji('ðŸ“¤').setStyle(ButtonStyle.Primary))];
+  return [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`${OPEN_PREFIX}${match.roundKey}:${match.matchIndex}`).setLabel('Enviar resultado').setEmoji('📤').setStyle(ButtonStyle.Primary))];
 }
 async function findExistingHub(channel, match) {
   if (!channel?.messages?.fetch) return null;
@@ -161,7 +162,7 @@ async function findExistingHub(channel, match) {
 async function sendOrUpdateHub(client, match, payload = {}) {
   const channelId = resultsChannelId(payload);
   const channel = await client.channels.fetch(channelId).catch(() => null);
-  if (!channel?.send) throw new Error(`Canal de resultados invÃ¡lido: ${channelId}`);
+  if (!channel?.send) throw new Error(`Canal de resultados inválido: ${channelId}`);
   const messagePayload = { embeds: [embedFor(match)], components: hubComponents(match), allowedMentions: { users: match.captainDiscordIds || [] } };
   const existing = await findExistingHub(channel, match);
   if (existing?.editable) {
@@ -207,7 +208,7 @@ async function showModal(interaction, match) {
     { type: 18, label: 'Print do resultado', description: 'Envie a print/comprovante da partida.', component: { type: 19, custom_id: 'proof', min_values: 1, max_values: 1, required: true } },
     { type: 18, label: `Gols ${match.teamA.tag || match.teamA.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreA', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } },
     { type: 18, label: `Gols ${match.teamB.tag || match.teamB.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreB', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } },
-    { type: 18, label: 'Partidas jÃ¡ jogadas', component: { type: 4, custom_id: 'played', style: 1, min_length: 1, max_length: 3, required: true, placeholder: String(match.maxGames || 1) } },
+    { type: 18, label: 'Partidas já jogadas', component: { type: 4, custom_id: 'played', style: 1, min_length: 1, max_length: 3, required: true, placeholder: String(match.maxGames || 1) } },
     { type: 18, label: 'Partidas faltando', component: { type: 4, custom_id: 'remaining', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } }
   ] } } });
 }
@@ -218,15 +219,15 @@ async function currentMatch(round, index) {
 async function submitToSite(interaction, raw, match) {
   await interaction.deferReply({ ephemeral: true });
   const proof = upload(raw, 'proof');
-  if (!proof?.url) return interaction.editReply('âŒ NÃ£o achei a print enviada.');
+  if (!proof?.url) return interaction.editReply('❌ Não achei a print enviada.');
   const payload = { roundKey: match.roundKey, matchIndex: match.matchIndex, match, scoreA: Number(readModal(raw, 'scoreA')), scoreB: Number(readModal(raw, 'scoreB')), playedGames: Number(readModal(raw, 'played')), remainingGames: Number(readModal(raw, 'remaining')), proof, authorDiscordId: interaction.user.id, authorName: interaction.member?.displayName || interaction.user.globalName || interaction.user.username, isStaff: isStaff(interaction.member), createdAt: new Date().toISOString() };
-  if (![payload.scoreA, payload.scoreB, payload.playedGames, payload.remainingGames].every(Number.isFinite)) return interaction.editReply('âŒ Preencha os nÃºmeros corretamente.');
+  if (![payload.scoreA, payload.scoreB, payload.playedGames, payload.remainingGames].every(Number.isFinite)) return interaction.editReply('❌ Preencha os números corretamente.');
   const siteUrl = String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
   const token = process.env.SITE_REALTIME_TOKEN || process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
   const response = await fetch(`${siteUrl}/internal/results/submit`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-site-realtime-token': token, 'x-bot-api-key': token, 'x-internal-token': token }, body: JSON.stringify(payload) });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || data.success === false) throw new Error(data.message || `Site recusou (${response.status})`);
-  const msg = data.result?.status === 'validated' ? 'âœ… Resultado validado e chaveamento atualizado no site.' : data.result?.status === 'conflict' ? 'âš ï¸ Resultado salvo, mas deu conflito. Staff precisa resolver.' : 'âœ… Resultado salvo. Aguardando confirmaÃ§Ã£o do outro capitÃ£o.';
+  const msg = data.result?.status === 'validated' ? '✅ Resultado validado e chaveamento atualizado no site.' : data.result?.status === 'conflict' ? '⚠️ Resultado salvo, mas deu conflito. Staff precisa resolver.' : '✅ Resultado salvo. Aguardando confirmação do outro capitão.';
   return interaction.editReply(msg);
 }
 
@@ -240,17 +241,17 @@ function registerMatchResultHandlers(client) {
       if (!message.guild || message.author.bot) return;
       const text = String(message.content || '').trim();
       if (!text.startsWith('.resultado-hub') && text !== '.resultados-sync') return;
-      if (!isStaff(message.member)) return message.reply('âŒ Apenas staff pode usar esse comando.');
+      if (!isStaff(message.member)) return message.reply('❌ Apenas staff pode usar esse comando.');
       if (text === '.resultados-sync') {
         const result = await syncResultHubsForBracket(message.client);
-        return message.reply(`âœ… HUBs sincronizadas: ${result.created} criadas, ${result.reused} atualizadas, ${result.totalMatches} confronto(s).`);
+        return message.reply(`✅ HUBs sincronizadas: ${result.created} criadas, ${result.reused} atualizadas, ${result.totalMatches} confronto(s)${result.errors?.length ? ` • ${result.errors.length} erro(s)` : ''}.`);
       }
       const [, roundArg = 'slots', numArg = '1'] = text.split(/\s+/);
       const match = await currentMatch(roundKey(roundArg), Math.max(0, Number(numArg || 1) - 1));
-      if (!match) return message.reply('âŒ NÃ£o achei esse confronto completo no chaveamento.');
+      if (!match) return message.reply('❌ Não achei esse confronto completo no chaveamento.');
       const hub = await sendOrUpdateHub(message.client, match);
-      return message.reply(`${hub.reused ? 'ðŸ”„ HUB atualizada' : 'âœ… HUB criada'} para **${match.teamA.name} vs ${match.teamB.name}**.`);
-    } catch (error) { console.error('Erro resultados:', error); return message.reply(`âŒ Erro: ${error.message}`).catch(() => {}); }
+      return message.reply(`${hub.reused ? '🔄 HUB atualizada' : '✅ HUB criada'} para **${match.teamA.name} vs ${match.teamB.name}**.`);
+    } catch (error) { console.error('Erro resultados:', error); return message.reply(`❌ Erro: ${error.message}`).catch(() => {}); }
   });
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
@@ -258,21 +259,21 @@ function registerMatchResultHandlers(client) {
       if (interaction.isButton?.() && id.startsWith(OPEN_PREFIX)) {
         const [round, idx] = id.slice(OPEN_PREFIX.length).split(':');
         const match = await currentMatch(round, Number(idx));
-        if (!match) return interaction.reply({ content: 'âŒ Confronto nÃ£o encontrado.', ephemeral: true });
-        if (!canUse(interaction.member, match)) return interaction.reply({ content: 'âŒ Apenas capitÃ£es desses times ou staff podem enviar.', ephemeral: true });
+        if (!match) return interaction.reply({ content: '❌ Confronto não encontrado.', ephemeral: true });
+        if (!canUse(interaction.member, match)) return interaction.reply({ content: '❌ Apenas capitães desses times ou staff podem enviar.', ephemeral: true });
         return showModal(interaction, match);
       }
       if (interaction.isModalSubmit?.() && id.startsWith(SUBMIT_PREFIX)) {
         const [round, idx] = id.slice(SUBMIT_PREFIX.length).split(':');
         const match = await currentMatch(round, Number(idx));
-        if (!match) return interaction.reply({ content: 'âŒ Confronto nÃ£o encontrado.', ephemeral: true });
-        if (!canUse(interaction.member, match)) return interaction.reply({ content: 'âŒ Apenas capitÃ£es desses times ou staff podem enviar.', ephemeral: true });
+        if (!match) return interaction.reply({ content: '❌ Confronto não encontrado.', ephemeral: true });
+        if (!canUse(interaction.member, match)) return interaction.reply({ content: '❌ Apenas capitães desses times ou staff podem enviar.', ephemeral: true });
         return submitToSite(interaction, rawMap.get(interaction.id), match);
       }
     } catch (error) {
-      console.error('Erro interaÃ§Ã£o resultado:', error);
-      if (interaction.deferred || interaction.replied) return interaction.editReply(`âŒ Erro: ${error.message}`).catch(() => {});
-      return interaction.reply({ content: `âŒ Erro: ${error.message}`, ephemeral: true }).catch(() => {});
+      console.error('Erro interação resultado:', error);
+      if (interaction.deferred || interaction.replied) return interaction.editReply(`❌ Erro: ${error.message}`).catch(() => {});
+      return interaction.reply({ content: `❌ Erro: ${error.message}`, ephemeral: true }).catch(() => {});
     }
   });
   return client;
