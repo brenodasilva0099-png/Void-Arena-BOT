@@ -1,12 +1,12 @@
 {
   "name": "void-arena-bot",
-  "version": "4.11",
-  "description": "Void Arena bot separado; dono do banco central JSON e da API interna protegida para o site.",
+  "version": "5.0.0",
+  "description": "Void Arena bot 5.0 reorganizado para acompanhar o site modular.",
   "main": "bot/index.js",
   "scripts": {
     "start": "node bot/index.js",
     "dev": "node bot/index.js",
-    "check": "node --check bot/index.js && node --check bot/discordClient.js && node --check bot/internalApi.js && node --check server/storage.js"
+    "check": "node --check bot/index.js && node --check bot/discordClient.js && node --check bot/internalApi.js && node --check bot/controlPanel.js && node --check bot/matchResults.js && node --check bot/eventValidation.js && node --check bot/playerApplications.js && node --check bot/trainingSubmissions.js && node --check server/storage.js"
   },
   "keywords": [
     "void-arena",

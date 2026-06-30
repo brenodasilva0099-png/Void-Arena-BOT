@@ -19,7 +19,7 @@ const SEED_BRACKET_FILE = path.join(PROJECT_DATA_DIR, 'bracket.json');
 
 const EMPTY_DATABASE = {
   meta: {
-    name: 'Abyss Tourment Game Database',
+    name: 'Void Arena Database',
     version: 1,
     createdAt: null,
     updatedAt: null
