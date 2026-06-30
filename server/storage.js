@@ -28,11 +28,13 @@ const EMPTY_DATABASE = {
   teams: [],
   bracket: {
     slots: [],
+    round16: [],
     quarters: [],
     semis: [],
     finals: [],
     matchProgress: {
       slots: [],
+      round16: [],
       quarters: [],
       semis: [],
       finals: []
@@ -51,6 +53,8 @@ const EMPTY_DATABASE = {
 };
 
 
+
+const SUPPORTED_TOURNAMENT_LIMITS = [4, 8, 12, 16, 20, 24, 28, 32];
 
 const DEFAULT_TOURNAMENT_EVENTS = [
   {
@@ -185,7 +189,8 @@ function normalizeMatchProgress(raw = {}) {
   };
 
   return {
-    slots: normalize(raw.slots, 16),
+    slots: normalize(raw.slots, Math.max(16, Array.isArray(raw.slots) && raw.slots.length > 16 ? 32 : 16)),
+    round16: normalize(raw.round16, 16),
     quarters: normalize(raw.quarters, 8),
     semis: normalize(raw.semis, 4),
     finals: normalize(raw.finals, 2)
@@ -204,7 +209,7 @@ function normalizeChatMessage(raw = {}) {
     authorId: String(raw.authorId || '').trim(),
     authorName: String(raw.authorName || 'Usuário').trim().slice(0, 80),
     authorAvatar: String(raw.authorAvatar || '').trim(),
-    content: String(raw.content || '').trim().slice(0, 2000),
+    content: String(raw.content || '').trim().slice(0, String(raw.channelId || '') === 'results-main' ? 50000 : 2000),
     attachments: Array.isArray(raw.attachments) ? raw.attachments.slice(0, 5).map((item) => ({
       url: String(item?.url || '').trim(),
       proxyUrl: String(item?.proxyUrl || item?.proxyURL || '').trim(),
@@ -676,6 +681,7 @@ async function deleteTeam(id) {
         return slotId && remainingIds.has(slotId) ? slotId : null;
       });
       db.bracket.slots = cleanSlots(db.bracket.slots);
+      db.bracket.round16 = cleanSlots(db.bracket.round16);
       db.bracket.quarters = cleanSlots(db.bracket.quarters);
       db.bracket.semis = cleanSlots(db.bracket.semis);
       db.bracket.finals = cleanSlots(db.bracket.finals);
@@ -689,7 +695,10 @@ async function deleteTeam(id) {
 async function readBracket() {
   const db = await readDatabase();
   return {
+    slotSize: Number(db.bracket?.slotSize || (Array.isArray(db.bracket?.slots) && db.bracket.slots.length > 16 ? 32 : 16)) || 16,
+    teamLimit: normalizeTournamentTeamLimit(db.bracket?.teamLimit || (Array.isArray(db.bracket?.slots) ? db.bracket.slots.filter(Boolean).length : 16)),
     slots: Array.isArray(db.bracket?.slots) ? db.bracket.slots : [],
+    round16: Array.isArray(db.bracket?.round16) ? db.bracket.round16 : [],
     quarters: Array.isArray(db.bracket?.quarters) ? db.bracket.quarters : [],
     semis: Array.isArray(db.bracket?.semis) ? db.bracket.semis : [],
     finals: Array.isArray(db.bracket?.finals) ? db.bracket.finals : [],
@@ -701,7 +710,10 @@ async function readBracket() {
 
 async function writeBracket(bracket) {
   const safeBracket = {
+    slotSize: Number(bracket.slotSize || (Array.isArray(bracket.slots) && bracket.slots.length > 16 ? 32 : 16)) || 16,
+    teamLimit: normalizeTournamentTeamLimit(bracket.teamLimit || (Array.isArray(bracket.slots) ? bracket.slots.filter(Boolean).length : 16)),
     slots: Array.isArray(bracket.slots) ? bracket.slots : [],
+    round16: Array.isArray(bracket.round16) ? bracket.round16 : [],
     quarters: Array.isArray(bracket.quarters) ? bracket.quarters : [],
     semis: Array.isArray(bracket.semis) ? bracket.semis : [],
     finals: Array.isArray(bracket.finals) ? bracket.finals : [],
@@ -719,7 +731,7 @@ async function writeBracket(bracket) {
 
 function normalizeTournamentTeamLimit(value) {
   const number = Number(value || 16);
-  const allowed = [4, 8, 16, 32];
+  const allowed = SUPPORTED_TOURNAMENT_LIMITS;
   return allowed.includes(number) ? number : 16;
 }
 
@@ -1141,7 +1153,7 @@ async function updateChatMessage(messageId, updates = {}, options = {}) {
       throw new Error('Essa mensagem não pode ser editada por aqui.');
     }
 
-    const nextContent = String(updates.content ?? current.content ?? '').trim().slice(0, 2000);
+    const nextContent = String(updates.content ?? current.content ?? '').trim().slice(0, String(current.channelId || options.channelId || '') === 'results-main' ? 50000 : 2000);
 
     if (!nextContent) {
       throw new Error('A mensagem não pode ficar vazia.');

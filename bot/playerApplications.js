@@ -35,12 +35,17 @@ function sessionKey(interactionOrMessage) {
 
 function panelEmbed() {
   return new EmbedBuilder()
-    .setTitle('📋 Formulário de Inscrição — Hollow Nexus')
-    .setDescription(
-      'Bem-vindo à seleção da Hollow Nexus! Para participar da avaliação, preencha todas as informações abaixo.\n\n' +
-      'Você pode preencher pelo Discord usando o botão abaixo.'
-    )
-    .setColor(0x8b5cf6);
+    .setTitle('📋 Inscrição Hollow Nexus')
+    .setDescription([
+      'Quer participar da seleção? Preencha o formulário em etapas rápidas.',
+      '',
+      '🎮 **Posição e estilo de jogo**',
+      '🧠 **Experiência, pontos fortes e pontos fracos**',
+      '🕒 **Horários disponíveis**',
+      '✅ A equipe recebe tudo organizado no site.'
+    ].join('\n'))
+    .setColor(0x8b5cf6)
+    .setFooter({ text: 'Void Arena • Formulário oficial Hollow Nexus' });
 }
 
 async function sendPanel(message) {
@@ -73,8 +78,8 @@ async function startForm(interaction) {
     ephemeral: true,
     embeds: [
       new EmbedBuilder()
-        .setTitle('📋 Inscrição Hollow Nexus — etapa 1')
-        .setDescription('Selecione posição principal, posição secundária e estilo de jogo. Depois clique em **Continuar**.')
+        .setTitle('📋 Etapa 1 • Perfil de jogo')
+        .setDescription('Selecione suas posições e estilo. Depois clique em **Continuar** para preencher as informações finais.')
         .setColor(0x22d3ee)
     ],
     components: [

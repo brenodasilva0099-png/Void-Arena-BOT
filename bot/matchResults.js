@@ -44,11 +44,11 @@ async function callSite(pathname, payload = {}) {
 
 function roundKey(value = '') {
   const key = String(value || '').toLowerCase();
-  return ({ slot: 'slots', slots: 'slots', oitavas: 'slots', quarters: 'quarters', quartas: 'quarters', semis: 'semis', semi: 'semis', finals: 'finals', final: 'finals' })[key] || key;
+  return ({ slot: 'slots', slots: 'slots', inicial: 'slots', round16: 'round16', oitavas: 'round16', quarters: 'quarters', quartas: 'quarters', semis: 'semis', semi: 'semis', finals: 'finals', final: 'finals' })[key] || key;
 }
 
 function roundLabel(key = '') {
-  return ({ slots: 'Oitavas', quarters: 'Quartas', semis: 'Semifinal', finals: 'Final' })[key] || key;
+  return ({ slots: 'Rodada inicial', round16: 'Oitavas', quarters: 'Quartas', semis: 'Semifinal', finals: 'Final' })[key] || key;
 }
 
 function maxGames(format = 'MD1') {
@@ -125,7 +125,8 @@ function hubId(match = {}) {
 function matchesFromBracket({ bracket = {}, teams = [], settings = {}, users = [] } = {}) {
   const byId = new Map(teams.map((team) => { const safe = safeTeam(team); return [safe.id, safe]; }));
   const format = settings.matchFormat || 'MD1';
-  const defs = [{ key: 'slots', size: 16 }, { key: 'quarters', size: 8 }, { key: 'semis', size: 4 }, { key: 'finals', size: 2 }];
+  const slotSize = Math.max(16, Array.isArray(bracket.slots) && bracket.slots.length > 16 ? 32 : 16);
+  const defs = [{ key: 'slots', size: slotSize }, { key: 'round16', size: 16 }, { key: 'quarters', size: 8 }, { key: 'semis', size: 4 }, { key: 'finals', size: 2 }];
   const matches = [];
   for (const def of defs) {
     const arr = Array.isArray(bracket[def.key]) ? bracket[def.key] : [];
@@ -214,30 +215,33 @@ async function fetchResultState(match) {
 async function embedFor(match, resultOverride = null) {
   const result = resultOverride || await fetchResultState(match);
   const state = seriesState(match, result);
-  const titleStatus = state.status === 'validated' ? 'Série finalizada' : state.status === 'conflict' ? 'Conflito pendente' : state.played > 0 ? 'Série em andamento' : 'Aguardando resultado';
+  const statusLabel = state.status === 'validated'
+    ? '✅ Série finalizada'
+    : state.status === 'conflict'
+      ? '⚠️ Conflito pendente'
+      : state.played > 0
+        ? '🟣 Série em andamento'
+        : '⏳ Aguardando 1º resultado';
   const currentLine = state.status === 'validated'
-    ? 'Série concluída. O vencedor já pode avançar no chaveamento.'
-    : `Partida atual: **Jogo ${state.current} de ${state.bestOf}**`;
+    ? '🏁 Série concluída. O site já pode avançar o vencedor.'
+    : `🎮 Jogo atual: **${state.current}/${state.bestOf}**`;
+  const lastProof = result?.proof?.url || result?.proof?.proxyUrl || '';
 
   return new EmbedBuilder()
-    .setTitle('Resultado da Partida')
+    .setTitle(`🏆 ${match.teamA.name} vs ${match.teamB.name}`)
     .setColor(state.status === 'validated' ? 0x22c55e : state.status === 'conflict' ? 0xef4444 : 0x8b5cf6)
     .setDescription([
-      `**${match.teamA.name}** vs **${match.teamB.name}**`, '',
-      `**Rodada:** ${match.roundLabel} ${match.matchNumber}`,
-      `**Formato:** ${match.matchFormat} • melhor de ${state.bestOf} • vence com ${state.needed} vitória(s)`,
-      `**Placar da série:** ${match.teamA.name} **${state.scoreA}** x **${state.scoreB}** ${match.teamB.name}`,
-      `**Status:** ${titleStatus}`,
-      `**${currentLine}**`,
-      `**Partidas concluídas:** ${state.played}/${state.bestOf}`,
-      `**Partidas possíveis restantes:** ${state.possibleRemaining}`,
-      `**Vitórias faltando para fechar:** ${state.winsRemaining}`
+      `📍 **${match.roundLabel} ${match.matchNumber}** • ${match.matchFormat}`,
+      `⚽ **Série:** ${match.teamA.name} **${state.scoreA}** x **${state.scoreB}** ${match.teamB.name}`,
+      `${currentLine}`,
+      `📊 **Status:** ${statusLabel}`
     ].join('\n'))
     .addFields(
-      { name: 'Histórico', value: gameHistoryText(match, result).slice(0, 1024) },
-      { name: 'Capitães autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.' }
+      { name: '📌 Progresso', value: [`Concluídas: **${state.played}/${state.bestOf}**`, `Restantes possíveis: **${state.possibleRemaining}**`, `Vitórias para fechar: **${state.winsRemaining}**`].join(' • '), inline: false },
+      { name: '🧾 Histórico', value: gameHistoryText(match, result).slice(0, 900), inline: false },
+      { name: '👑 Capitães', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.', inline: false }
     )
-    .setFooter({ text: `Void Arena • HUB única • ${match.hubKey}` })
+    .setFooter({ text: `Void Arena • HUB única • ${match.hubKey}${lastProof ? ' • print anexada' : ''}` })
     .setTimestamp(new Date());
 }
 
@@ -246,7 +250,7 @@ function hubComponents(match) {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId(`${OPEN_PREFIX}${match.roundKey}:${match.matchIndex}`)
-        .setLabel('Enviar / atualizar partida')
+        .setLabel('📤 Enviar / atualizar jogo')
         .setStyle(ButtonStyle.Primary)
     )
   ];
@@ -310,9 +314,9 @@ function upload(raw, id) {
 
 async function showModal(interaction, match) {
   const state = seriesState(match, await fetchResultState(match));
-  await interaction.client.rest.post(Routes.interactionCallback(interaction.id, interaction.token), { body: { type: 9, data: { custom_id: `${SUBMIT_PREFIX}${match.roundKey}:${match.matchIndex}`, title: 'Atualizar partida', components: [
-    { type: 18, label: 'Print do resultado', description: 'Envie a print/comprovante desta partida.', component: { type: 19, custom_id: 'proof', min_values: 1, max_values: 1, required: true } },
-    { type: 18, label: 'Número da partida na série', description: `Atual: jogo ${state.current} de ${state.bestOf}`, component: { type: 4, custom_id: 'gameNumber', style: 1, min_length: 1, max_length: 2, required: true, value: String(state.current), placeholder: String(state.current) } },
+  await interaction.client.rest.post(Routes.interactionCallback(interaction.id, interaction.token), { body: { type: 9, data: { custom_id: `${SUBMIT_PREFIX}${match.roundKey}:${match.matchIndex}`, title: 'Resultado da série', components: [
+    { type: 18, label: '📸 Print do resultado', description: 'Envie a print/comprovante desta partida.', component: { type: 19, custom_id: 'proof', min_values: 1, max_values: 1, required: true } },
+    { type: 18, label: '🎮 Número da partida na série', description: `Atual: jogo ${state.current} de ${state.bestOf}`, component: { type: 4, custom_id: 'gameNumber', style: 1, min_length: 1, max_length: 2, required: true, value: String(state.current), placeholder: String(state.current) } },
     { type: 18, label: `Gols ${match.teamA.tag || match.teamA.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreA', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } },
     { type: 18, label: `Gols ${match.teamB.tag || match.teamB.name}`.slice(0, 45), component: { type: 4, custom_id: 'scoreB', style: 1, min_length: 1, max_length: 3, required: true, placeholder: '0' } }
   ] } } });
@@ -380,7 +384,8 @@ function registerMatchResultHandlers(client) {
       if (!isStaff(message.member)) return message.reply('Apenas staff pode usar esse comando.');
       if (text === '.resultados-sync') {
         const result = await syncResultHubsForBracket(message.client);
-        return message.reply(`HUBs sincronizadas: ${result.created} criadas, ${result.reused} atualizadas, ${result.totalMatches} confronto(s)${result.errors?.length ? ` • ${result.errors.length} erro(s)` : ''}.`);
+        return message.reply(`✅ HUBs sincronizadas
+🆕 ${result.created} criada(s) • 🔁 ${result.reused} atualizada(s) • 🎮 ${result.totalMatches} confronto(s)${result.errors?.length ? ` • ⚠️ ${result.errors.length} erro(s)` : ''}.`);
       }
       const [, roundArg = 'slots', numArg = '1'] = text.split(/\s+/);
       const match = await currentMatch(roundKey(roundArg), Math.max(0, Number(numArg || 1) - 1));
