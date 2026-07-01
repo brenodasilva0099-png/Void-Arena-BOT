@@ -241,7 +241,7 @@ async function embedFor(match, resultOverride = null) {
       { name: '🧾 Histórico', value: gameHistoryText(match, result).slice(0, 900), inline: false },
       { name: '👑 Capitães autorizados', value: match.captainDiscordIds.length ? match.captainDiscordIds.map((id) => `<@${id}>`).join(', ') : 'Nenhum capitão vinculado. Staff pode enviar.', inline: false }
     )
-    .setFooter({ text: `Void Arena • HUB única • ${match.hubKey}${lastProof ? ' • print anexada' : ''}` })
+    .setFooter({ text: `Void Arena • HUB única • ${match.hubId || hubId(match)} • ${match.hubKey}${lastProof ? ' • print anexada' : ''}` })
     .setTimestamp(new Date());
 }
 
@@ -262,7 +262,7 @@ async function findExistingHub(channel, match) {
   if (!messages?.size) return null;
   return Array.from(messages.values()).find((message) => {
     if (!message.author?.bot) return false;
-    return Array.from(message.embeds || []).some((embed) => String(embed.footer?.text || '').includes(match.hubKey));
+    return Array.from(message.embeds || []).some((embed) => String(embed.footer?.text || '').includes(match.hubKey) || String(embed.footer?.text || '').includes(match.hubId || hubId(match)));
   }) || null;
 }
 

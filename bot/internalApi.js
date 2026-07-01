@@ -767,7 +767,7 @@ function startInternalApi({ client, port = 3002 } = {}) {
         return res.status(404).json({ success: false, message: "Servidor sem ícone ou bot ainda não conectado." });
       }
 
-      res.set("Cache-Control", "public, max-age=300");
+      res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
       return res.redirect(iconUrl);
     } catch (error) {
       return res.status(500).json({ success: false, message: error.message });
@@ -775,6 +775,7 @@ function startInternalApi({ client, port = 3002 } = {}) {
   });
 
   app.get("/public/guild-brand", async (_req, res) => {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
     try {
       const guild = resolvePrimaryGuild(client);
       const icon = guild?.iconURL?.({ extension: "png", size: 256 }) || null;
