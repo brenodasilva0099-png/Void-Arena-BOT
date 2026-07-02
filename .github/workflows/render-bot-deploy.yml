@@ -8,30 +8,8 @@ on:
 
 jobs:
   deploy:
-    name: Backup + Trigger Render BOT Deploy
+    name: Trigger Render BOT Deploy
     runs-on: ubuntu-latest
-    env:
-      RENDER_BOT_DEPLOY_HOOK: ${{ secrets.RENDER_BOT_DEPLOY_HOOK }}
-      BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
     steps:
-      - name: Check required secrets
-        run: |
-          if [ -z "$RENDER_BOT_DEPLOY_HOOK" ]; then
-            echo "Missing GitHub secret: RENDER_BOT_DEPLOY_HOOK"
-            exit 1
-          fi
-          if [ -z "$BOT_API_KEY" ]; then
-            echo "Missing GitHub secret: BOT_API_KEY"
-            exit 1
-          fi
-
-      - name: Backup database before BOT deploy
-        run: |
-          curl -fsS -X POST "https://void-arena-bot.onrender.com/internal/backup/github/export" \
-            -H "Content-Type: application/json" \
-            -H "x-bot-api-key: $BOT_API_KEY" \
-            --data '{"reason":"pre-bot-deploy"}'
-
       - name: Trigger Render BOT deploy hook
-        run: |
-          curl -fsS -X POST "$RENDER_BOT_DEPLOY_HOOK"
+        run: curl -fsS -X POST "${{ secrets.RENDER_BOT_DEPLOY_HOOK }}"
