@@ -1,0 +1,34 @@
+name: Deploy BOT to Render
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Backup + Trigger Render BOT Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check required secrets
+        run: |
+          if [ -z "${{ secrets.RENDER_BOT_DEPLOY_HOOK }}" ]; then
+            echo "Missing GitHub secret: RENDER_BOT_DEPLOY_HOOK"
+            exit 1
+          fi
+          if [ -z "${{ secrets.BOT_API_KEY }}" ]; then
+            echo "Missing GitHub secret: BOT_API_KEY"
+            exit 1
+          fi
+
+      - name: Backup database before BOT deploy
+        run: |
+          curl -fsS -X POST "https://void-arena-bot.onrender.com/internal/backup/github/export" \
+            -H "Content-Type: application/json" \
+            -H "x-bot-api-key: ${{ secrets.BOT_API_KEY }}" \
+            --data '{"reason":"pre-bot-deploy"}'
+
+      - name: Trigger Render BOT deploy hook
+        run: |
+          curl -fsS -X POST "${{ secrets.RENDER_BOT_DEPLOY_HOOK }}"
