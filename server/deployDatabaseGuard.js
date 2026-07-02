@@ -1,5 +1,7 @@
 const githubBackups = require('./githubBackups');
 
+const BASELINE_PATH = process.env.GITHUB_BACKUP_BASELINE_PATH || 'backups/2026-07/void-arena-backup-2026-07-02T02-35-01-258Z.json';
+
 function isEffectivelyEmpty(status = {}) {
   return (
     Number(status.users || 0) === 0 &&
@@ -8,6 +10,10 @@ function isEffectivelyEmpty(status = {}) {
     Number(status.teamChats || 0) === 0 &&
     Number(status.bracketSlots || 0) === 0
   );
+}
+
+async function useBaseline(storage) {
+  return githubBackups.restoreBackupFromGitHubPath(storage, BASELINE_PATH);
 }
 
 async function runDeployDatabaseGuard(storage, options = {}) {
@@ -21,15 +27,13 @@ async function runDeployDatabaseGuard(storage, options = {}) {
   try {
     status = await storage.readDatabaseStatus();
   } catch (error) {
-    console.warn('Banco inacessível no boot. Tentando restaurar latest backup:', error.message);
-    const restored = await githubBackups.restoreLatestBackupFromGitHub(storage);
-    return { success: true, restored: true, reason: 'database_inaccessible', restored };
+    const fixed = await useBaseline(storage);
+    return { success: true, restored: true, reason: 'database_inaccessible', restored: fixed };
   }
 
   if (status?.error || isEffectivelyEmpty(status)) {
-    console.warn('Banco vazio/corrompido no boot. Tentando restaurar latest backup.', status);
-    const restored = await githubBackups.restoreLatestBackupFromGitHub(storage);
-    return { success: true, restored: true, reason: 'database_empty_or_corrupted', restored };
+    const fixed = await useBaseline(storage);
+    return { success: true, restored: true, reason: 'database_empty_or_corrupted', restored: fixed };
   }
 
   return {
@@ -38,7 +42,7 @@ async function runDeployDatabaseGuard(storage, options = {}) {
     skipped: true,
     reason: 'database_healthy',
     status,
-    note: 'Banco saudável: nenhum restore executado.'
+    note: 'Banco saudavel: nenhum ajuste executado.'
   };
 }
 
