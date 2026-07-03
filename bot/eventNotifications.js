@@ -88,7 +88,7 @@ function buildMessage(event = {}, reason = 'published') {
     event.paymentInstructions ? `Validação: ${clean(event.paymentInstructions, 260)}` : '',
     '',
     `Acesse: ${eventLink()}`,
-    isEdit ? 'Esta mensagem foi atualizada para não enviar uma nova DM a cada edição.' : 'Crie ou escolha seu time e envie a inscrição pela página de Eventos.'
+    isEdit ? 'Esta mensagem será atualizada nas próximas edições, sem disparar outra DM.' : 'Crie ou escolha seu time e envie a inscrição pela página de Eventos.'
   ];
 
   return lines.filter((line) => line !== '').join('\n').slice(0, 1900);
@@ -169,11 +169,7 @@ async function notifyEventCaptains(client, payload = {}) {
 
   for (const discordId of recipientIds) {
     const existing = noticeMap.get(discordId);
-    if (editOnly) {
-      if (!existing?.messageId) {
-        results.push({ discordId, skipped: true, reason: 'no_existing_dm_to_edit' });
-        continue;
-      }
+    if (editOnly && existing?.messageId) {
       const edited = await editCaptainDM(client, existing, content);
       results.push(edited);
       if (edited.edited) noticeMap.set(discordId, { ...existing, updatedAt: new Date().toISOString() });
@@ -181,9 +177,9 @@ async function notifyEventCaptains(client, payload = {}) {
     }
 
     const sent = await sendCaptainDM(client, discordId, content);
-    results.push(sent);
+    results.push({ ...sent, reason: editOnly ? 'no_previous_dm_reference_sent_once' : 'new_event_notice' });
     if (sent.sent) {
-      noticeMap.set(discordId, { discordId, channelId: sent.channelId, messageId: sent.messageId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      noticeMap.set(discordId, { discordId, channelId: sent.channelId, messageId: sent.messageId, createdAt: existing?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString() });
     }
   }
 
@@ -196,7 +192,7 @@ async function notifyEventCaptains(client, payload = {}) {
 
   return {
     success: sent > 0 || edited > 0 || skipped > 0,
-    mode: forceNew ? 'send_new' : 'edit_existing',
+    mode: forceNew ? 'send_new' : 'edit_or_seed_existing_notice',
     attempted: results.length,
     sent,
     edited,
