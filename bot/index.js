@@ -2,6 +2,7 @@ require('dotenv').config();
 
 const { createDiscordClient, startDiscordBot } = require('./discordClient');
 const { startInternalApi } = require('./internalApi');
+const { startEventDmSync } = require('./eventDmSync');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { runDeployDatabaseGuard } = require('../server/deployDatabaseGuard');
@@ -12,7 +13,7 @@ const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT ||
 function startScheduledBackups() {
   const enabled = String(process.env.GITHUB_BACKUP_SCHEDULED || 'true').toLowerCase() !== 'false';
   if (!enabled) {
-    console.log('Backups automáticos agendados: desativados.');
+    console.log('Backups automaticos agendados: desativados.');
     return null;
   }
 
@@ -23,12 +24,12 @@ function startScheduledBackups() {
     try {
       const manifest = await githubBackups.saveBackupToGitHub(storage, { reason });
       if (manifest?.skipped) {
-        console.log(`Backup automático pulado: ${manifest.reason || manifest.message || 'sem motivo'}`);
+        console.log(`Backup automatico pulado: ${manifest.reason || manifest.message || 'sem motivo'}`);
       } else {
-        console.log(`Backup automático salvo: ${manifest.backupPath || manifest.savedAt || 'ok'}`);
+        console.log(`Backup automatico salvo: ${manifest.backupPath || manifest.savedAt || 'ok'}`);
       }
     } catch (error) {
-      console.error('Backup automático falhou:', error.message);
+      console.error('Backup automatico falhou:', error.message);
     }
   }
 
@@ -36,7 +37,7 @@ function startScheduledBackups() {
   const timer = setInterval(() => run('scheduled-auto-backup'), intervalMs);
   timer.unref?.();
 
-  console.log(`Backups automáticos agendados a cada ${minutes} min.`);
+  console.log(`Backups automaticos agendados a cada ${minutes} min.`);
   return timer;
 }
 
@@ -51,14 +52,15 @@ async function boot() {
   startInternalApi({ client, port: INTERNAL_API_PORT });
   startDiscordBot(client);
   startScheduledBackups();
+  startEventDmSync(client, storage);
 }
 
 boot();
 
 process.on('unhandledRejection', (error) => {
-  console.error('Erro não tratado no bot:', error);
+  console.error('Erro nao tratado no bot:', error);
 });
 
 process.on('uncaughtException', (error) => {
-  console.error('Exceção não tratada:', error);
+  console.error('Excecao nao tratada:', error);
 });
