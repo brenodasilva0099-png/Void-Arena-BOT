@@ -5,21 +5,34 @@ const filePath = path.join(__dirname, 'matchResults.js');
 let source = fs.readFileSync(filePath, 'utf8');
 let changed = false;
 
-if (!source.includes('function resultHistoryChannelId')) {
-  source = source.replace(
-    "function siteUrl() {",
-    `function resultHistoryChannelId() {
-  return String(process.env.RESULTS_HISTORY_CHANNEL_ID || process.env.RESULT_HISTORY_CHANNEL_ID || process.env.HISTORY_CHANNEL_ID || process.env.MATCH_HISTORY_CHANNEL_ID || '').trim();
+const channelResolver = `function resultHistoryChannelId() {
+  return String(
+    process.env.RESULTS_HISTORY_CHANNEL_ID ||
+    process.env.RESULT_HISTORY_CHANNEL_ID ||
+    process.env.HISTORY_CHANNEL_ID ||
+    process.env.MATCH_HISTORY_CHANNEL_ID ||
+    process.env.RESULTS_CHANNEL_ID ||
+    process.env.EVENT_VALIDATION_CHANNEL_ID ||
+    process.env.VALIDATION_CHANNEL_ID ||
+    '1518441859519877120'
+  ).trim();
 }
+`;
 
-function siteUrl() {`
-  );
+if (source.includes('function resultHistoryChannelId')) {
+  const next = source.replace(/function resultHistoryChannelId\(\) \{[\s\S]*?\n\}\n\nfunction siteUrl\(\) \{/, `${channelResolver}\nfunction siteUrl() {`);
+  if (next !== source) {
+    source = next;
+    changed = true;
+  }
+} else {
+  source = source.replace('function siteUrl() {', `${channelResolver}\nfunction siteUrl() {`);
   changed = true;
 }
 
 if (!source.includes('async function mirrorProofToHistory')) {
   source = source.replace(
-    "async function submitToSite(interaction, raw, match) {",
+    'async function submitToSite(interaction, raw, match) {',
     `async function mirrorProofToHistory(client, payload = {}, result = {}) {
   const channelId = resultHistoryChannelId();
   const proofUrl = payload.proof?.url || payload.proof?.proxyUrl || '';
@@ -62,7 +75,7 @@ if (!source.includes('mirrorProofToHistory(interaction.client, payload')) {
 
 if (changed) {
   fs.writeFileSync(filePath, source, 'utf8');
-  console.log('Patch aplicado: prints de resultados serão espelhadas no canal de histórico.');
+  console.log('Patch aplicado: prints de resultados serão espelhadas no canal de histórico/validação.');
 } else {
-  console.log('Patch ignorado: histórico de resultados já estava configurado.');
+  console.log('Patch ignorado: histórico de resultados ja estava configurado.');
 }
