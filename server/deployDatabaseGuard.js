@@ -25,6 +25,12 @@ function isEffectivelyEmpty(status = {}) {
   return totalDataWeight(status) === 0;
 }
 
+function bootBackupReason(options = {}) {
+  if (options.reason) return String(options.reason);
+  if (process.env.RENDER_GIT_COMMIT) return `boot-${process.env.RENDER_GIT_COMMIT}`;
+  return 'boot-healthy-database';
+}
+
 async function restoreBestBackup(storage) {
   if (BASELINE_PATH) {
     return githubBackups.restoreBackupFromGitHubPath(storage, BASELINE_PATH);
@@ -44,7 +50,7 @@ async function backupHealthyDatabase(storage, status, options = {}) {
   }
 
   return githubBackups.saveBackupToGitHub(storage, {
-    reason: options.reason || process.env.RENDER_GIT_COMMIT ? `boot-${process.env.RENDER_GIT_COMMIT}` : 'boot-healthy-database'
+    reason: bootBackupReason(options)
   });
 }
 
