@@ -13,9 +13,17 @@ if (!source.includes('entryFee: String(raw.entryFee || raw.registrationFee')) {
   changed = true;
 }
 
+if (!source.includes('captainNoticeMessages: Array.isArray(raw.captainNoticeMessages)')) {
+  source = source.replace(
+    "    registrations: uniqueRegistrations,\n    createdAt: raw.createdAt || now,",
+    "    registrations: uniqueRegistrations,\n    captainNoticeMessages: Array.isArray(raw.captainNoticeMessages)\n      ? raw.captainNoticeMessages.map((item) => ({\n        discordId: String(item.discordId || '').trim(),\n        channelId: String(item.channelId || '').trim(),\n        messageId: String(item.messageId || '').trim(),\n        createdAt: item.createdAt || now,\n        updatedAt: item.updatedAt || item.createdAt || now\n      })).filter((item) => item.discordId && item.messageId).slice(-300)\n      : [],\n    createdAt: raw.createdAt || now,"
+  );
+  changed = true;
+}
+
 if (changed) {
   fs.writeFileSync(filePath, source, 'utf8');
-  console.log('Patch aplicado: campos reward/entryFee/F2P adicionados aos eventos.');
+  console.log('Patch aplicado: campos extras de evento e DMs de capitaes preservados.');
 } else {
   console.log('Patch ignorado: campos extras de evento ja existem.');
 }
