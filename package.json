@@ -4,9 +4,9 @@
   "description": "Void Arena 5.1.2: perfil separado, evento ativo persistente, editor manual e resultados/chaveamento sincronizados.",
   "main": "bot/index.js",
   "scripts": {
-    "start": "node bot/index.js",
-    "dev": "node bot/index.js",
-    "check": "node --check bot/index.js && node --check bot/predeploy-backup.js && node --check bot/discordClient.js && node --check bot/internalApi.js && node --check bot/controlPanel.js && node --check bot/matchResults.js && node --check bot/eventValidation.js && node --check bot/playerApplications.js && node --check bot/trainingSubmissions.js && node --check server/storage.js && node --check server/deployDatabaseGuard.js"
+    "start": "node bot/patch-internal-event-notifications.js && node bot/index.js",
+    "dev": "node bot/patch-internal-event-notifications.js && node bot/index.js",
+    "check": "node --check bot/index.js && node --check bot/predeploy-backup.js && node --check bot/discordClient.js && node --check bot/internalApi.js && node --check bot/eventNotifications.js && node --check bot/patch-internal-event-notifications.js && node --check bot/controlPanel.js && node --check bot/matchResults.js && node --check bot/eventValidation.js && node --check bot/playerApplications.js && node --check bot/trainingSubmissions.js && node --check server/storage.js && node --check server/deployDatabaseGuard.js"
   },
   "keywords": [
     "void-arena",
