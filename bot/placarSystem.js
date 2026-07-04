@@ -13,7 +13,11 @@ const {
 const placar = require('./placarStorage');
 
 const PLACAR_CHANNEL_ID = String(process.env.PLACAR_CHANNEL_ID || '1522782784987463801').trim();
+const QUEUE_CHANNEL_ID = String(process.env.PLACAR_QUEUE_CHANNEL_ID || process.env.CAFE_COM_LEITE_CHANNEL_ID || '1523063064658972833').trim();
 const MATCH_CATEGORY_ID = String(process.env.PLACAR_MATCH_CATEGORY_ID || process.env.MATCH_CATEGORY_ID || '').trim();
+const SITE_PLACAR_URL = String(process.env.SITE_PUBLIC_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com/pages/placar.html').trim();
+const ANIMATED_THUMBNAIL_URL = String(process.env.VOID_ARENA_ANIMATED_THUMBNAIL_URL || process.env.VOID_ARENA_ANIMATED_ICON_URL || '').trim();
+const ANIMATED_BANNER_URL = String(process.env.VOID_ARENA_ANIMATED_BANNER_URL || process.env.VOID_ARENA_GIF_URL || '').trim();
 
 function playerFromMember(member) {
   return {
@@ -31,6 +35,12 @@ function modeLabel(mode) {
   return placar.normalizeMode(mode).toUpperCase().replace('V', 'x');
 }
 
+function decorateEmbed(embed, options = {}) {
+  if (ANIMATED_THUMBNAIL_URL) embed.setThumbnail(ANIMATED_THUMBNAIL_URL);
+  if (options.banner && ANIMATED_BANNER_URL) embed.setImage(ANIMATED_BANNER_URL);
+  return embed;
+}
+
 function queuePanelRows() {
   return [
     new ActionRowBuilder().addComponents(
@@ -41,7 +51,8 @@ function queuePanelRows() {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('placar:ranking:3v3').setLabel('Ranking 3x3').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('placar:animation-test').setLabel('Testar GIF').setEmoji('✨').setStyle(ButtonStyle.Secondary)
     )
   ];
 }
@@ -50,28 +61,28 @@ async function queuePanelEmbed() {
   const data = await placar.getFullScoreboard();
   const q3 = data.queues['3v3']?.length || 0;
   const q5 = data.queues['5v5']?.length || 0;
-  return new EmbedBuilder()
-    .setTitle('🏟️ Sistema de Placar Rematch')
+  return decorateEmbed(new EmbedBuilder()
+    .setTitle('☕ Fila Café com Leite Rematch')
     .setColor(0x22d3ee)
     .setDescription([
-      'Entre na fila para partidas internas do servidor. Quando fechar jogadores suficientes, o bot sorteia os times, cria a call privada e avisa os participantes por DM.',
+      'Entre aqui na fila 3x3 ou 5x5. Quando fechar jogadores suficientes, o bot sorteia os times, cria a call privada e avisa os participantes por DM.',
       '',
       `**Fila 3x3:** ${q3}/6 jogadores`,
       `**Fila 5x5:** ${q5}/10 jogadores`,
       '',
-      'Depois da partida, use o botão **Reportar resultado** na mensagem da partida para atualizar placar, pontos e patente.'
+      'Esse canal é só para fila e resultado da partida. O ranking/placar/patentes fica separado no canal Placar.'
     ].join('\n'))
-    .setFooter({ text: 'Void Arena • Placar café com leite do servidor' })
-    .setTimestamp(new Date());
+    .setFooter({ text: 'Void Arena • Fila Café com Leite' })
+    .setTimestamp(new Date()), { banner: false });
 }
 
 async function ensureQueuePanel(client) {
-  if (!PLACAR_CHANNEL_ID || !client?.channels?.fetch) return;
-  const channel = await client.channels.fetch(PLACAR_CHANNEL_ID).catch(() => null);
-  if (!channel?.isTextBased?.()) return;
+  if (!QUEUE_CHANNEL_ID || !client?.channels?.fetch) return null;
+  const channel = await client.channels.fetch(QUEUE_CHANNEL_ID).catch(() => null);
+  if (!channel?.isTextBased?.()) return null;
   const embed = await queuePanelEmbed();
   const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
-  const existing = Array.from(messages?.values?.() || []).find((msg) => msg.author?.id === client.user?.id && msg.embeds?.[0]?.title?.includes('Sistema de Placar'));
+  const existing = Array.from(messages?.values?.() || []).find((msg) => msg.author?.id === client.user?.id && msg.embeds?.[0]?.title?.includes('Fila Café com Leite'));
   if (existing) {
     await existing.edit({ embeds: [embed], components: queuePanelRows() }).catch(() => null);
     return existing;
@@ -79,10 +90,69 @@ async function ensureQueuePanel(client) {
   return channel.send({ embeds: [embed], components: queuePanelRows() });
 }
 
+function rankingPanelRows() {
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('placar:ranking:3v3').setLabel('Ranking 3x3').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('placar:animation-test').setLabel('Testar GIF').setEmoji('✨').setStyle(ButtonStyle.Secondary)
+  )];
+}
+
+function rankingText(players = [], mode = '3v3') {
+  const top = players.slice(0, 10);
+  if (!top.length) return `Ainda não tem ranking ${modeLabel(mode)}.`;
+  return top.map((p, index) => `**#${index + 1}** ${p.rankEmoji} <@${p.discordId}> — **${p.points} pts** • ${p.wins}V/${p.matches}J • WR ${p.winRate}%`).join('\n');
+}
+
+// VOID_ARENA_RANKING_PANEL_FUNCTIONS
+async function rankingPanelEmbed() {
+  const data = await placar.getFullScoreboard();
+  const top3 = (data.leaderboards?.['3v3'] || []).slice(0, 5);
+  const top5 = (data.leaderboards?.['5v5'] || []).slice(0, 5);
+  return decorateEmbed(new EmbedBuilder()
+    .setTitle('🏆 Placar • Rankings e Patentes')
+    .setColor(0x22d3ee)
+    .setDescription([
+      'Canal limpo para consultar ranking, pontos e patentes do Café com Leite.',
+      '🌐 **Ver placar completo no site:** ' + SITE_PLACAR_URL,
+      '',
+      '**Top 3x3**',
+      rankingText(top3, '3v3'),
+      '',
+      '**Top 5x5**',
+      rankingText(top5, '5v5')
+    ].join('\n'))
+    .setFooter({ text: 'Void Arena • Placar oficial do servidor' })
+    .setTimestamp(new Date()), { banner: true });
+}
+
+async function ensureRankingPanel(client) {
+  if (!PLACAR_CHANNEL_ID || !client?.channels?.fetch) return null;
+  const channel = await client.channels.fetch(PLACAR_CHANNEL_ID).catch(() => null);
+  if (!channel?.isTextBased?.()) return null;
+
+  const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+  const botMessages = Array.from(messages?.values?.() || []).filter((msg) => msg.author?.id === client.user?.id);
+  for (const old of botMessages) {
+    const title = old.embeds?.[0]?.title || '';
+    if (title.includes('Sistema de Placar Rematch') || title.includes('Fila Café com Leite')) {
+      await old.delete().catch(() => null);
+    }
+  }
+
+  const embed = await rankingPanelEmbed();
+  const existing = botMessages.find((msg) => msg.embeds?.[0]?.title?.includes('Placar • Rankings e Patentes'));
+  if (existing) {
+    await existing.edit({ embeds: [embed], components: rankingPanelRows() }).catch(() => null);
+    return existing;
+  }
+  return channel.send({ embeds: [embed], components: rankingPanelRows() });
+}
+
 function matchEmbed(match) {
   const teamA = (match.teamA || []).map((p) => `<@${p.discordId}>`).join('\n');
   const teamB = (match.teamB || []).map((p) => `<@${p.discordId}>`).join('\n');
-  return new EmbedBuilder()
+  return decorateEmbed(new EmbedBuilder()
     .setTitle(`⚽ Partida encontrada • ${modeLabel(match.mode)}`)
     .setColor(0x8b5cf6)
     .setDescription([
@@ -97,7 +167,7 @@ function matchEmbed(match) {
       '',
       'Quando acabar, um participante clica em **Reportar resultado**.'
     ].filter(Boolean).join('\n'))
-    .setTimestamp(new Date());
+    .setTimestamp(new Date()), { banner: false });
 }
 
 function matchRows(match) {
@@ -150,13 +220,13 @@ async function maybeStartMatch(client, interaction, mode) {
   if (!selected) return null;
   const guild = interaction.guild;
   const sourceChannel = interaction.channel;
-  let match = await placar.createMatch(mode, selected, { textChannelId: PLACAR_CHANNEL_ID });
+  let match = await placar.createMatch(mode, selected, { textChannelId: QUEUE_CHANNEL_ID });
   const voiceChannel = await createPrivateVoiceForMatch(guild, sourceChannel, match).catch(() => null);
   if (voiceChannel) {
-    match = await placar.attachMatchMessage(match.id, { voiceChannelId: voiceChannel.id, textChannelId: PLACAR_CHANNEL_ID });
+    match = await placar.attachMatchMessage(match.id, { voiceChannelId: voiceChannel.id, textChannelId: QUEUE_CHANNEL_ID });
     await moveOrDmPlayers(guild, match, voiceChannel);
   }
-  const channel = await client.channels.fetch(PLACAR_CHANNEL_ID).catch(() => sourceChannel);
+  const channel = await client.channels.fetch(QUEUE_CHANNEL_ID).catch(() => sourceChannel);
   const sent = await channel.send({
     content: [...match.teamA, ...match.teamB].map((p) => `<@${p.discordId}>`).join(' '),
     embeds: [matchEmbed(match)],
@@ -165,6 +235,7 @@ async function maybeStartMatch(client, interaction, mode) {
   });
   await placar.attachMatchMessage(match.id, { discordMessageId: sent.id, textChannelId: sent.channelId, voiceChannelId: voiceChannel?.id || '' });
   await ensureQueuePanel(client);
+  await ensureRankingPanel(client).catch(() => null);
   return match;
 }
 
@@ -183,16 +254,29 @@ async function handleQueueInteraction(client, interaction, action, mode) {
   return interaction.reply({ content: result.removed ? `✅ Você saiu da fila ${modeLabel(safeMode)}.` : `Você não estava na fila ${modeLabel(safeMode)}.`, ephemeral: true });
 }
 
-function rankingText(players = [], mode = '3v3') {
-  const top = players.slice(0, 10);
-  if (!top.length) return `Ainda não tem ranking ${modeLabel(mode)}.`;
-  return top.map((p, index) => `**#${index + 1}** ${p.rankEmoji} <@${p.discordId}> — **${p.points} pts** • ${p.wins}V/${p.matches}J • WR ${p.winRate}%`).join('\n');
-}
-
 async function showRanking(interaction, mode) {
   const data = await placar.getLeaderboard(mode);
   return interaction.reply({
-    embeds: [new EmbedBuilder().setTitle(`🏆 Ranking Placar ${modeLabel(data.mode)}`).setDescription(rankingText(data.players, data.mode)).setColor(0x22d3ee)],
+    embeds: [decorateEmbed(new EmbedBuilder().setTitle(`🏆 Ranking Placar ${modeLabel(data.mode)}`).setDescription(rankingText(data.players, data.mode)).setColor(0x22d3ee), { banner: false })],
+    ephemeral: true
+  });
+}
+
+async function showAnimationTest(interaction) {
+  const description = [
+    'Teste de imagem animada nos embeds/painéis do bot.',
+    '',
+    ANIMATED_THUMBNAIL_URL ? '✅ Thumbnail animada configurada.' : '⚠️ Thumbnail animada ainda não configurada.',
+    ANIMATED_BANNER_URL ? '✅ Banner/GIF animado configurado.' : '⚠️ Banner/GIF animado ainda não configurado.',
+    '',
+    'Para testar, coloque as URLs nas envs do Render e faça redeploy.'
+  ].join('\n');
+  return interaction.reply({
+    embeds: [decorateEmbed(new EmbedBuilder()
+      .setTitle('✨ Teste visual Void Arena')
+      .setDescription(description)
+      .setColor(0x8b5cf6)
+      .setTimestamp(new Date()), { banner: true })],
     ephemeral: true
   });
 }
@@ -253,7 +337,7 @@ async function handleResultModal(interaction, matchId) {
   });
   await updateRankRoles(interaction.guild, Array.from(participantIds), match.mode);
   const finished = result.match;
-  const summary = new EmbedBuilder()
+  const summary = decorateEmbed(new EmbedBuilder()
     .setTitle(`✅ Resultado validado • ${modeLabel(finished.mode)}`)
     .setDescription([
       `**Time A:** ${finished.scoreA}`,
@@ -263,8 +347,9 @@ async function handleResultModal(interaction, matchId) {
       'Patentes e placar individual atualizados.'
     ].join('\n'))
     .setColor(0x22c55e)
-    .setTimestamp(new Date());
+    .setTimestamp(new Date()), { banner: false });
   await interaction.reply({ embeds: [summary] });
+  await ensureRankingPanel(interaction.client).catch(() => null);
   if (interaction.message?.editable) {
     await interaction.message.edit({ embeds: [matchEmbed({ ...finished })], components: [] }).catch(() => null);
   }
@@ -275,7 +360,10 @@ function registerPlacarSystem(client) {
   client.__voidArenaPlacarRegistered = true;
 
   client.once(Events.ClientReady, () => {
-    setTimeout(() => ensureQueuePanel(client).catch((error) => console.error('[placar] painel:', error.message)), 4000).unref?.();
+    setTimeout(() => Promise.all([
+      ensureQueuePanel(client),
+      ensureRankingPanel(client)
+    ]).catch((error) => console.error('[placar] painel:', error.message)), 4000).unref?.();
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -286,6 +374,7 @@ function registerPlacarSystem(client) {
         if (action === 'queue') return handleQueueInteraction(client, interaction, value, mode);
         if (action === 'ranking') return showRanking(interaction, value);
         if (action === 'result') return interaction.showModal(resultModal(value));
+        if (action === 'animation-test') return showAnimationTest(interaction);
       }
       if (interaction.isModalSubmit?.() && String(interaction.customId || '').startsWith('placar:result-modal:')) {
         const matchId = interaction.customId.replace('placar:result-modal:', '');
@@ -300,4 +389,4 @@ function registerPlacarSystem(client) {
   });
 }
 
-module.exports = { registerPlacarSystem, ensureQueuePanel, updateRankRoles };
+module.exports = { registerPlacarSystem, ensureQueuePanel, ensureRankingPanel, updateRankRoles };
