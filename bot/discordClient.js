@@ -11,6 +11,7 @@ const { registerControlPanel } = require('./controlPanel');
 const { registerEventValidation } = require('./eventValidation');
 const { registerPlayerApplications } = require('./playerApplications');
 const { registerMatchResultHandlers } = require('./matchResults');
+const { registerPlacarSystem } = require('./placarSystem');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
@@ -21,7 +22,8 @@ function createDiscordClient() {
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.MessageContent,
-      GatewayIntentBits.GuildMembers
+      GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildVoiceStates
     ]
   });
 }
@@ -107,6 +109,7 @@ function registerDiscordHandlers(client) {
   registerEventValidation(client);
   registerPlayerApplications(client);
   registerMatchResultHandlers(client);
+  registerPlacarSystem(client);
 
   client.once(Events.ClientReady, (readyClient) => {
     console.log(`✅ Bot online como ${readyClient.user.tag}`);
