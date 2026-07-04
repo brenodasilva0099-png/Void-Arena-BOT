@@ -16,8 +16,6 @@ const PLACAR_CHANNEL_ID = String(process.env.PLACAR_CHANNEL_ID || '1522782784987
 const QUEUE_CHANNEL_ID = String(process.env.PLACAR_QUEUE_CHANNEL_ID || process.env.CAFE_COM_LEITE_CHANNEL_ID || '1523063064658972833').trim();
 const MATCH_CATEGORY_ID = String(process.env.PLACAR_MATCH_CATEGORY_ID || process.env.MATCH_CATEGORY_ID || '').trim();
 const SITE_PLACAR_URL = String(process.env.SITE_PUBLIC_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com/pages/placar.html').trim();
-const ANIMATED_THUMBNAIL_URL = String(process.env.VOID_ARENA_ANIMATED_THUMBNAIL_URL || process.env.VOID_ARENA_ANIMATED_ICON_URL || '').trim();
-const ANIMATED_BANNER_URL = String(process.env.VOID_ARENA_ANIMATED_BANNER_URL || process.env.VOID_ARENA_GIF_URL || '').trim();
 
 function playerFromMember(member) {
   return {
@@ -35,12 +33,6 @@ function modeLabel(mode) {
   return placar.normalizeMode(mode).toUpperCase().replace('V', 'x');
 }
 
-function decorateEmbed(embed, options = {}) {
-  if (ANIMATED_THUMBNAIL_URL) embed.setThumbnail(ANIMATED_THUMBNAIL_URL);
-  if (options.banner && ANIMATED_BANNER_URL) embed.setImage(ANIMATED_BANNER_URL);
-  return embed;
-}
-
 function queuePanelRows() {
   return [
     new ActionRowBuilder().addComponents(
@@ -51,8 +43,7 @@ function queuePanelRows() {
     ),
     new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId('placar:ranking:3v3').setLabel('Ranking 3x3').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('placar:animation-test').setLabel('Testar GIF').setEmoji('✨').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary)
     )
   ];
 }
@@ -61,7 +52,7 @@ async function queuePanelEmbed() {
   const data = await placar.getFullScoreboard();
   const q3 = data.queues['3v3']?.length || 0;
   const q5 = data.queues['5v5']?.length || 0;
-  return decorateEmbed(new EmbedBuilder()
+  return new EmbedBuilder()
     .setTitle('☕ Fila Café com Leite Rematch')
     .setColor(0x22d3ee)
     .setDescription([
@@ -73,7 +64,7 @@ async function queuePanelEmbed() {
       'Esse canal é só para fila e resultado da partida. O ranking/placar/patentes fica separado no canal Placar.'
     ].join('\n'))
     .setFooter({ text: 'Void Arena • Fila Café com Leite' })
-    .setTimestamp(new Date()), { banner: false });
+    .setTimestamp(new Date());
 }
 
 async function ensureQueuePanel(client) {
@@ -93,8 +84,7 @@ async function ensureQueuePanel(client) {
 function rankingPanelRows() {
   return [new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('placar:ranking:3v3').setLabel('Ranking 3x3').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId('placar:animation-test').setLabel('Testar GIF').setEmoji('✨').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary)
   )];
 }
 
@@ -109,7 +99,7 @@ async function rankingPanelEmbed() {
   const data = await placar.getFullScoreboard();
   const top3 = (data.leaderboards?.['3v3'] || []).slice(0, 5);
   const top5 = (data.leaderboards?.['5v5'] || []).slice(0, 5);
-  return decorateEmbed(new EmbedBuilder()
+  return new EmbedBuilder()
     .setTitle('🏆 Placar • Rankings e Patentes')
     .setColor(0x22d3ee)
     .setDescription([
@@ -123,7 +113,7 @@ async function rankingPanelEmbed() {
       rankingText(top5, '5v5')
     ].join('\n'))
     .setFooter({ text: 'Void Arena • Placar oficial do servidor' })
-    .setTimestamp(new Date()), { banner: true });
+    .setTimestamp(new Date());
 }
 
 async function ensureRankingPanel(client) {
@@ -152,7 +142,7 @@ async function ensureRankingPanel(client) {
 function matchEmbed(match) {
   const teamA = (match.teamA || []).map((p) => `<@${p.discordId}>`).join('\n');
   const teamB = (match.teamB || []).map((p) => `<@${p.discordId}>`).join('\n');
-  return decorateEmbed(new EmbedBuilder()
+  return new EmbedBuilder()
     .setTitle(`⚽ Partida encontrada • ${modeLabel(match.mode)}`)
     .setColor(0x8b5cf6)
     .setDescription([
@@ -167,7 +157,7 @@ function matchEmbed(match) {
       '',
       'Quando acabar, um participante clica em **Reportar resultado**.'
     ].filter(Boolean).join('\n'))
-    .setTimestamp(new Date()), { banner: false });
+    .setTimestamp(new Date());
 }
 
 function matchRows(match) {
@@ -257,26 +247,7 @@ async function handleQueueInteraction(client, interaction, action, mode) {
 async function showRanking(interaction, mode) {
   const data = await placar.getLeaderboard(mode);
   return interaction.reply({
-    embeds: [decorateEmbed(new EmbedBuilder().setTitle(`🏆 Ranking Placar ${modeLabel(data.mode)}`).setDescription(rankingText(data.players, data.mode)).setColor(0x22d3ee), { banner: false })],
-    ephemeral: true
-  });
-}
-
-async function showAnimationTest(interaction) {
-  const description = [
-    'Teste de imagem animada nos embeds/painéis do bot.',
-    '',
-    ANIMATED_THUMBNAIL_URL ? '✅ Thumbnail animada configurada.' : '⚠️ Thumbnail animada ainda não configurada.',
-    ANIMATED_BANNER_URL ? '✅ Banner/GIF animado configurado.' : '⚠️ Banner/GIF animado ainda não configurado.',
-    '',
-    'Para testar, coloque as URLs nas envs do Render e faça redeploy.'
-  ].join('\n');
-  return interaction.reply({
-    embeds: [decorateEmbed(new EmbedBuilder()
-      .setTitle('✨ Teste visual Void Arena')
-      .setDescription(description)
-      .setColor(0x8b5cf6)
-      .setTimestamp(new Date()), { banner: true })],
+    embeds: [new EmbedBuilder().setTitle(`🏆 Ranking Placar ${modeLabel(data.mode)}`).setDescription(rankingText(data.players, data.mode)).setColor(0x22d3ee)],
     ephemeral: true
   });
 }
@@ -337,7 +308,7 @@ async function handleResultModal(interaction, matchId) {
   });
   await updateRankRoles(interaction.guild, Array.from(participantIds), match.mode);
   const finished = result.match;
-  const summary = decorateEmbed(new EmbedBuilder()
+  const summary = new EmbedBuilder()
     .setTitle(`✅ Resultado validado • ${modeLabel(finished.mode)}`)
     .setDescription([
       `**Time A:** ${finished.scoreA}`,
@@ -347,7 +318,7 @@ async function handleResultModal(interaction, matchId) {
       'Patentes e placar individual atualizados.'
     ].join('\n'))
     .setColor(0x22c55e)
-    .setTimestamp(new Date()), { banner: false });
+    .setTimestamp(new Date());
   await interaction.reply({ embeds: [summary] });
   await ensureRankingPanel(interaction.client).catch(() => null);
   if (interaction.message?.editable) {
@@ -374,7 +345,6 @@ function registerPlacarSystem(client) {
         if (action === 'queue') return handleQueueInteraction(client, interaction, value, mode);
         if (action === 'ranking') return showRanking(interaction, value);
         if (action === 'result') return interaction.showModal(resultModal(value));
-        if (action === 'animation-test') return showAnimationTest(interaction);
       }
       if (interaction.isModalSubmit?.() && String(interaction.customId || '').startsWith('placar:result-modal:')) {
         const matchId = interaction.customId.replace('placar:result-modal:', '');
