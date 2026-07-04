@@ -34,18 +34,12 @@ function modeLabel(mode) {
 }
 
 function queuePanelRows() {
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('placar:queue:join:3v3').setLabel('Entrar fila 3x3').setEmoji('3️⃣').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('placar:queue:leave:3v3').setLabel('Sair 3x3').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('placar:queue:join:5v5').setLabel('Entrar fila 5x5').setEmoji('5️⃣').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('placar:queue:leave:5v5').setLabel('Sair 5x5').setStyle(ButtonStyle.Secondary)
-    ),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('placar:ranking:3v3').setLabel('Ranking 3x3').setEmoji('🏆').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('placar:ranking:5v5').setLabel('Ranking 5x5').setEmoji('📊').setStyle(ButtonStyle.Secondary)
-    )
-  ];
+  return [new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('placar:queue:join:3v3').setLabel('Entrar fila 3x3').setEmoji('3️⃣').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('placar:queue:leave:3v3').setLabel('Sair 3x3').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('placar:queue:join:5v5').setLabel('Entrar fila 5x5').setEmoji('5️⃣').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('placar:queue:leave:5v5').setLabel('Sair 5x5').setStyle(ButtonStyle.Secondary)
+  )];
 }
 
 async function queuePanelEmbed() {
