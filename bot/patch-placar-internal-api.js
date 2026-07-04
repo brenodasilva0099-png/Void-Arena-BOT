@@ -58,10 +58,12 @@ function patchPlacarSystem() {
     src = src.replace('\nfunction matchEmbed(match) {', `${rankingFunctions}\nfunction matchEmbed(match) {`);
   }
 
-  src = src.replace(
-    "await interaction.reply({ embeds: [summary] });",
-    "await interaction.reply({ embeds: [summary] });\n  await ensureRankingPanel(interaction.client).catch(() => null);"
-  );
+  if (!src.includes('await ensureRankingPanel(interaction.client)')) {
+    src = src.replace(
+      "await interaction.reply({ embeds: [summary] });",
+      "await interaction.reply({ embeds: [summary] });\n  await ensureRankingPanel(interaction.client).catch(() => null);"
+    );
+  }
 
   src = src.replace(
     "setTimeout(() => ensureQueuePanel(client).catch((error) => console.error('[placar] painel:', error.message)), 4000).unref?.();",
