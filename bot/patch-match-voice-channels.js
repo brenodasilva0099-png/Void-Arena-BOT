@@ -8,6 +8,13 @@ if (!src.includes('ChannelType,')) {
   src = src.replace('  Events,\n  PermissionFlagsBits,', '  Events,\n  ChannelType,\n  PermissionFlagsBits,');
 }
 
+if (!src.includes('teamADiscordIds: teamDiscordIds(teamA, users)')) {
+  src = src.replace(
+    "captainDiscordIds: unique([...teamDiscordIds(teamA, users), ...teamDiscordIds(teamB, users)])",
+    "teamADiscordIds: teamDiscordIds(teamA, users),\n        teamBDiscordIds: teamDiscordIds(teamB, users),\n        captainDiscordIds: unique([...teamDiscordIds(teamA, users), ...teamDiscordIds(teamB, users)])"
+  );
+}
+
 if (!src.includes('function safeChannelName')) {
   const helpers = `
 function safeChannelName(value = '') {
@@ -16,7 +23,7 @@ function safeChannelName(value = '') {
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 80) || 'partida';
+    .slice(0, 80) || 'time';
 }
 
 function configuredMatchCategoryId(payload = {}, settings = {}) {
@@ -34,7 +41,7 @@ function readableTeamName(team = {}, fallback = 'time') {
   return String(team.name || team.displayName || team.tag || fallback).trim() || fallback;
 }
 
-async function findOrCreateMatchVoice(client, match = {}, payload = {}, settings = {}) {
+async function findOrCreateTeamVoice(client, team = {}, allowedIds = [], payload = {}, settings = {}) {
   if (!settings.autoCreateMatchChannels && settings.autoCreateMatchChannels !== undefined) return null;
   const categoryId = configuredMatchCategoryId(payload, settings);
   if (!categoryId || !client?.channels?.fetch) return null;
@@ -43,9 +50,7 @@ async function findOrCreateMatchVoice(client, match = {}, payload = {}, settings
   const guild = category?.guild || client.guilds?.cache?.first?.() || null;
   if (!guild?.channels?.create) return null;
 
-  const a = readableTeamName(match.teamA, 'time-a');
-  const b = readableTeamName(match.teamB, 'time-b');
-  const name = safeChannelName(a + '-vs-' + b);
+  const name = safeChannelName(readableTeamName(team, 'time'));
   const existing = Array.from(guild.channels.cache.values()).find((channel) => (
     channel?.type === ChannelType.GuildVoice &&
     channel.parentId === categoryId &&
@@ -53,51 +58,52 @@ async function findOrCreateMatchVoice(client, match = {}, payload = {}, settings
   ));
   if (existing) return existing;
 
-  const allowedIds = Array.from(new Set(match.captainDiscordIds || [])).filter(Boolean);
+  const ids = Array.from(new Set(allowedIds || [])).filter(Boolean).slice(0, 7);
   const permissionOverwrites = [
     { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },
-    ...allowedIds.map((id) => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.Stream] }))
+    ...ids.map((id) => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.Stream] }))
   ];
 
   return guild.channels.create({
     name,
     type: ChannelType.GuildVoice,
     parent: categoryId,
-    userLimit: allowedIds.length || undefined,
+    userLimit: 7,
     permissionOverwrites,
-    reason: 'Void Arena: call privada automática do confronto'
+    reason: 'Void Arena: call privada automática do time'
   });
+}
+
+async function ensureTeamVoiceChannels(client, match = {}, payload = {}, settings = {}) {
+  const entries = [
+    { team: match.teamA, ids: match.teamADiscordIds || [] },
+    { team: match.teamB, ids: match.teamBDiscordIds || [] }
+  ];
+  const created = [];
+  for (const entry of entries) {
+    if (!entry.team?.id) continue;
+    const channel = await findOrCreateTeamVoice(client, entry.team, entry.ids, payload, settings).catch(() => null);
+    if (channel?.id) created.push({ id: channel.id, name: channel.name, team: readableTeamName(entry.team, 'time') });
+  }
+  return created;
 }
 `;
   src = src.replace('\nfunction hubKey(match = {}) {', `${helpers}\nfunction hubKey(match = {}) {`);
 }
 
-if (src.includes("const a = match.teamA?.tag || match.teamA?.name || 'time-a';")) {
-  src = src.replace("const a = match.teamA?.tag || match.teamA?.name || 'time-a';", "const a = readableTeamName(match.teamA, 'time-a');");
-}
-if (src.includes("const b = match.teamB?.tag || match.teamB?.name || 'time-b';")) {
-  src = src.replace("const b = match.teamB?.tag || match.teamB?.name || 'time-b';", "const b = readableTeamName(match.teamB, 'time-b');");
-}
-if (src.includes("const matchNumber = match.matchNumber || Number(match.matchIndex || 0) + 1;\n  const name = safeChannelName('partida-' + (match.roundKey || 'fase') + '-' + matchNumber + '-' + a + '-vs-' + b);")) {
-  src = src.replace("const matchNumber = match.matchNumber || Number(match.matchIndex || 0) + 1;\n  const name = safeChannelName('partida-' + (match.roundKey || 'fase') + '-' + matchNumber + '-' + a + '-vs-' + b);", "const name = safeChannelName(a + '-vs-' + b);");
-}
-if (!src.includes('function readableTeamName')) {
-  src = src.replace('\nasync function findOrCreateMatchVoice', "\nfunction readableTeamName(team = {}, fallback = 'time') {\n  return String(team.name || team.displayName || team.tag || fallback).trim() || fallback;\n}\n\nasync function findOrCreateMatchVoice");
-}
-
-if (!src.includes('match.voiceChannelId ? `🔊 **Call privada:**')) {
+if (!src.includes('teamVoiceChannels?.length')) {
   src = src.replace(
     "`${statusLabel}`\n    ].join('\\n'))",
-    "`${statusLabel}`,\n      match.voiceChannelId ? `🔊 **Call privada:** <#${match.voiceChannelId}>` : ''\n    ].filter(Boolean).join('\\n'))"
+    "`${statusLabel}`,\n      match.teamVoiceChannels?.length ? '🔊 **Calls dos times:** ' + match.teamVoiceChannels.map((item) => item.team + ': <#' + item.id + '>').join(' • ') : ''\n    ].filter(Boolean).join('\\n'))"
   );
 }
 
-if (!src.includes('const voice = await findOrCreateMatchVoice(client, match, payload, settings)')) {
+if (!src.includes('const voices = await ensureTeamVoiceChannels(client, match, payload, settings)')) {
   src = src.replace(
     "for (const match of matches) {\n    try { hubs.push(await sendOrUpdateHub(client, match, payload)); }",
-    "for (const match of matches) {\n    try {\n      const voice = await findOrCreateMatchVoice(client, match, payload, settings).catch(() => null);\n      if (voice?.id) match.voiceChannelId = voice.id;\n      hubs.push(await sendOrUpdateHub(client, match, payload));\n    }"
+    "for (const match of matches) {\n    try {\n      const voices = await ensureTeamVoiceChannels(client, match, payload, settings).catch(() => []);\n      if (voices?.length) match.teamVoiceChannels = voices;\n      hubs.push(await sendOrUpdateHub(client, match, payload));\n    }"
   );
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: calls privadas usam nomes limpos dos times.');
+console.log('Patch aplicado: HUBs criam uma call privada por time, com limite de 7 jogadores.');
