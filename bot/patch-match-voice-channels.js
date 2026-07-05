@@ -26,6 +26,15 @@ function safeChannelName(value = '') {
     .slice(0, 80) || 'time';
 }
 
+function legacyVoiceSlug(value = '') {
+  return String(value || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'time';
+}
+
 function configuredMatchCategoryId(payload = {}, settings = {}) {
   return String(
     payload.discordMatchCategoryId ||
@@ -54,11 +63,14 @@ async function findOrCreateTeamVoice(client, team = {}, allowedIds = [], payload
   const guild = category?.guild || client.guilds?.cache?.first?.() || null;
   if (!guild?.channels?.create) return null;
 
+  const rawName = readableTeamName(team, 'time');
   const name = privateTeamVoiceName(team);
+  const legacyName = legacyVoiceSlug(rawName);
+  const plainName = safeChannelName(rawName);
   const existing = Array.from(guild.channels.cache.values()).find((channel) => (
     channel?.type === ChannelType.GuildVoice &&
     channel.parentId === categoryId &&
-    (channel.name === name || channel.name === safeChannelName(readableTeamName(team, 'time')))
+    (channel.name === name || channel.name === plainName || channel.name === legacyName)
   ));
   if (existing) {
     if (existing.name !== name && existing.edit) await existing.edit({ name }).catch(() => null);
