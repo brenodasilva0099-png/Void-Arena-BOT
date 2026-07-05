@@ -19,10 +19,10 @@ if (!src.includes('function safeChannelName')) {
   const helpers = `
 function safeChannelName(value = '') {
   return String(value || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/[@#`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
     .slice(0, 80) || 'time';
 }
 
@@ -41,6 +41,10 @@ function readableTeamName(team = {}, fallback = 'time') {
   return String(team.name || team.displayName || team.tag || fallback).trim() || fallback;
 }
 
+function privateTeamVoiceName(team = {}) {
+  return safeChannelName('👤・' + readableTeamName(team, 'time'));
+}
+
 async function findOrCreateTeamVoice(client, team = {}, allowedIds = [], payload = {}, settings = {}) {
   if (!settings.autoCreateMatchChannels && settings.autoCreateMatchChannels !== undefined) return null;
   const categoryId = configuredMatchCategoryId(payload, settings);
@@ -50,13 +54,16 @@ async function findOrCreateTeamVoice(client, team = {}, allowedIds = [], payload
   const guild = category?.guild || client.guilds?.cache?.first?.() || null;
   if (!guild?.channels?.create) return null;
 
-  const name = safeChannelName(readableTeamName(team, 'time'));
+  const name = privateTeamVoiceName(team);
   const existing = Array.from(guild.channels.cache.values()).find((channel) => (
     channel?.type === ChannelType.GuildVoice &&
     channel.parentId === categoryId &&
-    channel.name === name
+    (channel.name === name || channel.name === safeChannelName(readableTeamName(team, 'time')))
   ));
-  if (existing) return existing;
+  if (existing) {
+    if (existing.name !== name && existing.edit) await existing.edit({ name }).catch(() => null);
+    return existing;
+  }
 
   const ids = Array.from(new Set(allowedIds || [])).filter(Boolean).slice(0, 7);
   const permissionOverwrites = [
@@ -106,4 +113,4 @@ if (!src.includes('const voices = await ensureTeamVoiceChannels(client, match, p
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: HUBs criam uma call privada por time, com limite de 7 jogadores.');
+console.log('Patch aplicado: calls privadas dos times usam 👤・ e nome do time.');
