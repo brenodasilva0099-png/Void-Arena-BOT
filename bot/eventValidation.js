@@ -62,6 +62,10 @@ function canVerify(member) {
   );
 }
 
+function eventLabel(request = {}, event = null) {
+  return event?.title || event?.name || request.eventName || request.eventTitle || request.tournamentName || request.eventId || 'Evento';
+}
+
 function readModalValue(rawInteraction, customId) {
   const rows = Array.isArray(rawInteraction?.data?.components) ? rawInteraction.data.components : [];
 
@@ -168,7 +172,7 @@ function requestSummaryEmbed(request = {}, proofFile = null) {
       `**Time:** ${request.teamName || request.teamId}\n` +
       `**Tag:** ${request.teamTag || '-'}\n` +
       `**Responsável:** ${request.responsibleName || '-'}\n` +
-      `**Evento:** ${request.eventId}\n` +
+      `**Evento:** ${eventLabel(request)}\n` +
       `**Arquivo:** ${fileName}`
     )
     .setColor(0xf59e0b)
@@ -293,10 +297,11 @@ async function handleVerify(interaction) {
   const result = await storage.approveEventRegistrationRequest(requestId, {
     approvedBy: interaction.user.id
   });
+  const label = eventLabel(result.request, result.event);
 
   await notifySiteRealtime('event-registration:approved', { requestId, eventId: result.request.eventId, teamId: result.request.teamId });
 
-  await interaction.editReply(`✅ Inscrição verificada. O time **${result.request.teamName || result.request.teamId}** foi aceito no evento do site.`);
+  await interaction.editReply(`✅ Inscrição verificada. O time **${result.request.teamName || result.request.teamId}** foi aceito no evento **${label}**.`);
 
   if (interaction.message?.editable) {
     const file = result.request.paymentProofFile;
@@ -308,7 +313,7 @@ async function handleVerify(interaction) {
             `**Time:** ${result.request.teamName || result.request.teamId}\n` +
             `**Tag:** ${result.request.teamTag || '-'}\n` +
             `**Responsável:** ${result.request.responsibleName || '-'}\n` +
-            `**Evento:** ${result.request.eventId}\n` +
+            `**Evento:** ${label}\n` +
             `**Arquivo:** ${file?.name || 'comprovante'}\n\n` +
             'O time já foi aceito no evento do site.'
           )
