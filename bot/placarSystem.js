@@ -64,7 +64,7 @@ async function queuePanelEmbed() {
       `**Fila 3x3:** ${q3}/6 jogadores`,
       `**Fila 5x5:** ${q5}/10 jogadores`,
       '',
-      'Esse canal é só para fila e resultado da partida. O ranking/placar/patentes fica separado no canal Placar.'
+      `Esse canal é só para fila e resultado da partida. O ranking/placar/patentes fica separado no canal <#${PLACAR_CHANNEL_ID}>.`
     ].join('\n'))
     .setFooter({ text: 'Void Arena • Fila Café com Leite' })
     .setTimestamp(new Date());
