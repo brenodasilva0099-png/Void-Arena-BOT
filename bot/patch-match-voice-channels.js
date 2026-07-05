@@ -15,8 +15,20 @@ if (!src.includes('teamADiscordIds: teamDiscordIds(teamA, users)')) {
   );
 }
 
-if (!src.includes('function safeChannelName')) {
+if (!src.includes('function matchVoiceViewOnlyRoleIds')) {
   const helpers = [
+    '',
+    'function envList(name, fallback = "") {',
+    '  return String(process.env[name] || fallback).split(",").map((item) => item.trim()).filter(Boolean);',
+    '}',
+    '',
+    'function matchVoiceViewOnlyRoleIds() {',
+    '  return envList("MATCH_VOICE_VIEW_ROLE_IDS", "1297729406432710656,1493641717059031182");',
+    '}',
+    '',
+    'function matchVoiceConnectRoleIds() {',
+    '  return envList("MATCH_VOICE_CONNECT_ROLE_IDS", "1523438475716853851");',
+    '}',
     '',
     'function safeChannelName(value = "") {',
     '  return String(value || "")',
@@ -58,6 +70,34 @@ if (!src.includes('function safeChannelName')) {
     '  return safeChannelName("👤・" + readableTeamName(team, "time"));',
     '}',
     '',
+    'function voicePermissionOverwrites(guild, allowedIds = []) {',
+    '  const uniqueIds = Array.from(new Set(allowedIds || [])).filter(Boolean).slice(0, 7);',
+    '  const overwrites = [',
+    '    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },',
+    '    ...matchVoiceViewOnlyRoleIds().map((id) => ({',
+    '      id,',
+    '      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],',
+    '      deny: [PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.Stream, PermissionFlagsBits.SendMessages]',
+    '    })),',
+    '    ...matchVoiceConnectRoleIds().map((id) => ({',
+    '      id,',
+    '      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.Stream, PermissionFlagsBits.UseVAD, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.SendMessages]',
+    '    })),',
+    '    ...uniqueIds.map((id) => ({',
+    '      id,',
+    '      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.Stream, PermissionFlagsBits.UseVAD, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.SendMessages]',
+    '    }))',
+    '  ];',
+    '  return overwrites;',
+    '}',
+    '',
+    'async function applyTeamVoicePermissions(channel, guild, allowedIds = []) {',
+    '  if (!channel?.permissionOverwrites?.set || !guild?.id) return channel;',
+    '  await channel.permissionOverwrites.set(voicePermissionOverwrites(guild, allowedIds), "Void Arena: permissões das calls privadas dos times").catch(() => null);',
+    '  if (channel.userLimit !== 7 && channel.edit) await channel.edit({ userLimit: 7 }).catch(() => null);',
+    '  return channel;',
+    '}',
+    '',
     'async function findOrCreateTeamVoice(client, team = {}, allowedIds = [], payload = {}, settings = {}) {',
     '  if (!settings.autoCreateMatchChannels && settings.autoCreateMatchChannels !== undefined) return null;',
     '  const categoryId = configuredMatchCategoryId(payload, settings);',
@@ -78,23 +118,42 @@ if (!src.includes('function safeChannelName')) {
     '  ));',
     '  if (existing) {',
     '    if (existing.name !== name && existing.edit) await existing.edit({ name }).catch(() => null);',
+    '    await applyTeamVoicePermissions(existing, guild, allowedIds);',
     '    return existing;',
     '  }',
-    '',
-    '  const ids = Array.from(new Set(allowedIds || [])).filter(Boolean).slice(0, 7);',
-    '  const permissionOverwrites = [',
-    '    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect] },',
-    '    ...ids.map((id) => ({ id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak, PermissionFlagsBits.Stream] }))',
-    '  ];',
     '',
     '  return guild.channels.create({',
     '    name,',
     '    type: ChannelType.GuildVoice,',
     '    parent: categoryId,',
     '    userLimit: 7,',
-    '    permissionOverwrites,',
+    '    permissionOverwrites: voicePermissionOverwrites(guild, allowedIds),',
     '    reason: "Void Arena: call privada automática do time"',
     '  });',
+    '}',
+    '',
+    'function teamsForVoiceFromBracket(bracket = {}, teams = [], settings = {}) {',
+    '  const byId = new Map(teams.map((team) => { const safe = safeTeam(team); return [safe.id, safe]; }));',
+    '  const ids = [];',
+    '  for (const key of ["slots", "round16", "quarters", "semis", "finals"]) {',
+    '    const arr = Array.isArray(bracket[key]) ? bracket[key] : [];',
+    '    arr.forEach((item) => { const id = teamIdOf(item); if (id) ids.push(id); });',
+    '  }',
+    '  const selected = unique(ids).map((id) => byId.get(id)).filter(Boolean);',
+    '  if (selected.length) return selected;',
+    '  const limit = Math.max(1, Math.min(32, Number(settings.teamLimit || settings.limit || settings.maxTeams || teams.length || 32) || 32));',
+    '  return teams.map(safeTeam).filter((team) => team.id).slice(0, limit);',
+    '}',
+    '',
+    'async function ensureAllTeamVoiceChannels(client, bracket = {}, teams = [], users = [], payload = {}, settings = {}) {',
+    '  const voiceTeams = teamsForVoiceFromBracket(bracket, teams, settings);',
+    '  const created = [];',
+    '  for (const team of voiceTeams) {',
+    '    const ids = teamDiscordIds(team, users);',
+    '    const channel = await findOrCreateTeamVoice(client, team, ids, payload, settings).catch((error) => { console.error("Erro ao criar call do time", team?.name || team?.tag || team?.id, error.message); return null; });',
+    '    if (channel?.id) created.push({ id: channel.id, name: channel.name, team: readableTeamName(team, "time") });',
+    '  }',
+    '  return created;',
     '}',
     '',
     'async function ensureTeamVoiceChannels(client, match = {}, payload = {}, settings = {}) {',
@@ -122,6 +181,13 @@ if (!src.includes('teamVoiceChannels?.length')) {
   );
 }
 
+if (!src.includes('const allTeamVoiceChannels = await ensureAllTeamVoiceChannels(client, bracket, teams, users, payload, settings)')) {
+  src = src.replace(
+    "  const matches = matchesFromBracket({ bracket, teams, settings, users });\n  const hubs = [];",
+    "  const matches = matchesFromBracket({ bracket, teams, settings, users });\n  const allTeamVoiceChannels = await ensureAllTeamVoiceChannels(client, bracket, teams, users, payload, settings).catch((error) => { console.error('Erro ao garantir calls de todos os times:', error.message); return []; });\n  const hubs = [];"
+  );
+}
+
 if (!src.includes('const voices = await ensureTeamVoiceChannels(client, match, payload, settings)')) {
   src = src.replace(
     "for (const match of matches) {\n    try { hubs.push(await sendOrUpdateHub(client, match, payload)); }",
@@ -129,5 +195,12 @@ if (!src.includes('const voices = await ensureTeamVoiceChannels(client, match, p
   );
 }
 
+if (!src.includes('totalTeamVoiceChannels: allTeamVoiceChannels.length')) {
+  src = src.replace(
+    "return { success: true, resultsChannelId: resultsChannelId(payload), totalMatches: matches.length, created: hubs.filter((hub) => hub.created).length, reused: hubs.filter((hub) => hub.reused).length, hubs, errors };",
+    "return { success: true, resultsChannelId: resultsChannelId(payload), totalMatches: matches.length, totalTeamVoiceChannels: allTeamVoiceChannels.length, created: hubs.filter((hub) => hub.created).length, reused: hubs.filter((hub) => hub.reused).length, hubs, teamVoiceChannels: allTeamVoiceChannels, errors };"
+  );
+}
+
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: calls privadas dos times usam nome seguro e 👤・.');
+console.log('Patch aplicado: calls privadas garantidas para todos os times e permissões de cargos.');
