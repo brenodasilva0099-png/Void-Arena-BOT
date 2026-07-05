@@ -12,8 +12,11 @@ const {
 } = require('discord.js');
 const placar = require('./placarStorage');
 
-const PLACAR_CHANNEL_ID = String(process.env.PLACAR_CHANNEL_ID || '1522782784987463801').trim();
-const QUEUE_CHANNEL_ID = String(process.env.PLACAR_QUEUE_CHANNEL_ID || process.env.CAFE_COM_LEITE_CHANNEL_ID || '1523063064658972833').trim();
+const DEFAULT_PLACAR_CHANNEL_ID = '1522782784987463801';
+const DEFAULT_QUEUE_CHANNEL_ID = '1523063064658972833';
+const RAW_PLACAR_CHANNEL_ID = String(process.env.PLACAR_CHANNEL_ID || DEFAULT_PLACAR_CHANNEL_ID).trim();
+const QUEUE_CHANNEL_ID = String(process.env.PLACAR_QUEUE_CHANNEL_ID || process.env.CAFE_COM_LEITE_CHANNEL_ID || DEFAULT_QUEUE_CHANNEL_ID).trim();
+const PLACAR_CHANNEL_ID = RAW_PLACAR_CHANNEL_ID && RAW_PLACAR_CHANNEL_ID !== QUEUE_CHANNEL_ID ? RAW_PLACAR_CHANNEL_ID : DEFAULT_PLACAR_CHANNEL_ID;
 const MATCH_CATEGORY_ID = String(process.env.PLACAR_MATCH_CATEGORY_ID || process.env.MATCH_CATEGORY_ID || '').trim();
 const SITE_PLACAR_URL = String(process.env.SITE_PUBLIC_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com/pages/placar.html').trim();
 
@@ -31,6 +34,12 @@ function queueSize(mode) {
 
 function modeLabel(mode) {
   return placar.normalizeMode(mode).toUpperCase().replace('V', 'x');
+}
+
+async function pinPanelMessage(message, reason = 'Void Arena: painel fixo') {
+  if (!message?.pin) return message;
+  if (!message.pinned) await message.pin(reason).catch(() => null);
+  return message;
 }
 
 function queuePanelRows() {
@@ -66,13 +75,23 @@ async function ensureQueuePanel(client) {
   const channel = await client.channels.fetch(QUEUE_CHANNEL_ID).catch(() => null);
   if (!channel?.isTextBased?.()) return null;
   const embed = await queuePanelEmbed();
-  const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
-  const existing = Array.from(messages?.values?.() || []).find((msg) => msg.author?.id === client.user?.id && msg.embeds?.[0]?.title?.includes('Fila Café com Leite'));
+  const messages = await channel.messages.fetch({ limit: 30 }).catch(() => null);
+  const botMessages = Array.from(messages?.values?.() || []).filter((msg) => msg.author?.id === client.user?.id);
+
+  for (const old of botMessages) {
+    const title = old.embeds?.[0]?.title || '';
+    if (title.includes('Placar • Rankings e Patentes') || title.includes('Sistema de Placar Rematch')) {
+      await old.delete().catch(() => null);
+    }
+  }
+
+  const existing = botMessages.find((msg) => msg.embeds?.[0]?.title?.includes('Fila Café com Leite'));
   if (existing) {
     await existing.edit({ embeds: [embed], components: queuePanelRows() }).catch(() => null);
-    return existing;
+    return pinPanelMessage(existing, 'Void Arena: painel de fila Café com Leite');
   }
-  return channel.send({ embeds: [embed], components: queuePanelRows() });
+  const sent = await channel.send({ embeds: [embed], components: queuePanelRows() });
+  return pinPanelMessage(sent, 'Void Arena: painel de fila Café com Leite');
 }
 
 function rankingPanelRows() {
@@ -88,7 +107,6 @@ function rankingText(players = [], mode = '3v3') {
   return top.map((p, index) => `**#${index + 1}** ${p.rankEmoji} <@${p.discordId}> — **${p.points} pts** • ${p.wins}V/${p.matches}J • WR ${p.winRate}%`).join('\n');
 }
 
-// VOID_ARENA_RANKING_PANEL_FUNCTIONS
 async function rankingPanelEmbed() {
   const data = await placar.getFullScoreboard();
   const top3 = (data.leaderboards?.['3v3'] || []).slice(0, 5);
@@ -115,7 +133,7 @@ async function ensureRankingPanel(client) {
   const channel = await client.channels.fetch(PLACAR_CHANNEL_ID).catch(() => null);
   if (!channel?.isTextBased?.()) return null;
 
-  const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+  const messages = await channel.messages.fetch({ limit: 30 }).catch(() => null);
   const botMessages = Array.from(messages?.values?.() || []).filter((msg) => msg.author?.id === client.user?.id);
   for (const old of botMessages) {
     const title = old.embeds?.[0]?.title || '';
@@ -128,9 +146,10 @@ async function ensureRankingPanel(client) {
   const existing = botMessages.find((msg) => msg.embeds?.[0]?.title?.includes('Placar • Rankings e Patentes'));
   if (existing) {
     await existing.edit({ embeds: [embed], components: rankingPanelRows() }).catch(() => null);
-    return existing;
+    return pinPanelMessage(existing, 'Void Arena: painel de ranking Placar');
   }
-  return channel.send({ embeds: [embed], components: rankingPanelRows() });
+  const sent = await channel.send({ embeds: [embed], components: rankingPanelRows() });
+  return pinPanelMessage(sent, 'Void Arena: painel de ranking Placar');
 }
 
 function matchEmbed(match) {
@@ -156,8 +175,7 @@ function matchEmbed(match) {
 
 function matchRows(match) {
   return [new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`placar:result:${match.id}`).setLabel('Reportar resultado').setEmoji('📝').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`placar:ranking:${match.mode}`).setLabel(`Ranking ${modeLabel(match.mode)}`).setEmoji('🏆').setStyle(ButtonStyle.Secondary)
+    new ButtonBuilder().setCustomId(`placar:result:${match.id}`).setLabel('Reportar resultado').setEmoji('📝').setStyle(ButtonStyle.Primary)
   )];
 }
 
@@ -190,9 +208,9 @@ async function moveOrDmPlayers(guild, match, voiceChannel) {
       });
     } else {
       await member.send([
-        `⚽ **Partida encontrada na Void Arena!**`,
+        '⚽ **Partida encontrada na Void Arena!**',
         `Modo: **${modeLabel(match.mode)}**`,
-        `Você estava na fila, mas não estava em uma call.`,
+        'Você estava na fila, mas não estava em uma call.',
         `Entre pela call da partida: ${link}`
       ].join('\n')).catch(() => null);
     }
@@ -240,10 +258,7 @@ async function handleQueueInteraction(client, interaction, action, mode) {
 
 async function showRanking(interaction, mode) {
   const data = await placar.getLeaderboard(mode);
-  return interaction.reply({
-    embeds: [new EmbedBuilder().setTitle(`🏆 Ranking Placar ${modeLabel(data.mode)}`).setDescription(rankingText(data.players, data.mode)).setColor(0x22d3ee)],
-    ephemeral: true
-  });
+  return interaction.reply({ embeds: [new EmbedBuilder().setTitle(`🏆 Ranking Placar ${modeLabel(data.mode)}`).setDescription(rankingText(data.players, data.mode)).setColor(0x22d3ee)], ephemeral: true });
 }
 
 function resultModal(matchId) {
