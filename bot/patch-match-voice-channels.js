@@ -41,7 +41,8 @@ async function findOrCreateMatchVoice(client, match = {}, payload = {}, settings
 
   const a = match.teamA?.tag || match.teamA?.name || 'time-a';
   const b = match.teamB?.tag || match.teamB?.name || 'time-b';
-  const name = safeChannelName(`partida-${match.roundKey || 'fase'}-${match.matchNumber || Number(match.matchIndex || 0) + 1}-${a}-vs-${b}`);
+  const matchNumber = match.matchNumber || Number(match.matchIndex || 0) + 1;
+  const name = safeChannelName('partida-' + (match.roundKey || 'fase') + '-' + matchNumber + '-' + a + '-vs-' + b);
   const existing = Array.from(guild.channels.cache.values()).find((channel) => (
     channel?.type === ChannelType.GuildVoice &&
     channel.parentId === categoryId &&
@@ -75,10 +76,12 @@ if (!src.includes('match.voiceChannelId ? `🔊 **Call privada:**')) {
   );
 }
 
-src = src.replace(
-  "for (const match of matches) {\n    try { hubs.push(await sendOrUpdateHub(client, match, payload)); }",
-  "for (const match of matches) {\n    try {\n      const voice = await findOrCreateMatchVoice(client, match, payload, settings).catch(() => null);\n      if (voice?.id) match.voiceChannelId = voice.id;\n      hubs.push(await sendOrUpdateHub(client, match, payload));\n    }"
-);
+if (!src.includes('const voice = await findOrCreateMatchVoice(client, match, payload, settings)')) {
+  src = src.replace(
+    "for (const match of matches) {\n    try { hubs.push(await sendOrUpdateHub(client, match, payload)); }",
+    "for (const match of matches) {\n    try {\n      const voice = await findOrCreateMatchVoice(client, match, payload, settings).catch(() => null);\n      if (voice?.id) match.voiceChannelId = voice.id;\n      hubs.push(await sendOrUpdateHub(client, match, payload));\n    }"
+  );
+}
 
 fs.writeFileSync(file, src, 'utf8');
 console.log('Patch aplicado: HUBs criam calls privadas dos confrontos quando configurado.');
