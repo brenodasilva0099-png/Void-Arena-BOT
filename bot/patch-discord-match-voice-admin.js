@@ -98,8 +98,27 @@ if (!src.includes("app.get('/internal/discord/match-voices'")) {
       return res.status(400).json({ success: false, message: error.message });
     }
   });
+
+  app.post('/internal/discord/match-voices/delete', async (req, res) => {
+    try {
+      return res.json(await deleteManagedMatchVoiceChannels(client, req.body || {}));
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  });
 `;
   src = src.replace("\n  app.get('/internal/discord/channels', async (_req, res) => {", `${routes}\n  app.get('/internal/discord/channels', async (_req, res) => {`);
+} else if (!src.includes("app.post('/internal/discord/match-voices/delete'")) {
+  const postRoute = `
+  app.post('/internal/discord/match-voices/delete', async (req, res) => {
+    try {
+      return res.json(await deleteManagedMatchVoiceChannels(client, req.body || {}));
+    } catch (error) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
+  });
+`;
+  src = src.replace("\n  app.get('/internal/discord/channels', async (_req, res) => {", `${postRoute}\n  app.get('/internal/discord/channels', async (_req, res) => {`);
 }
 
 fs.writeFileSync(file, src, 'utf8');
