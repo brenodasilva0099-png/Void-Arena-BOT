@@ -23,7 +23,7 @@ function normalizeMode(mode = '') {
 
 function defaultPlacar() {
   return {
-    version: 1,
+    version: 2,
     pointsRule: {
       win: 25,
       draw: 12,
@@ -35,6 +35,13 @@ function defaultPlacar() {
       mvp: 10,
       cleanSheet: 6,
       noShow: -10
+    },
+    fairness: {
+      enabled: true,
+      activeWindowMinutes: 90,
+      pairWindowMinutes: 240,
+      recentMatchWeight: 100,
+      pairRepeatWeight: 35
     },
     players: { '3v3': {}, '5v5': {} },
     queues: { '3v3': [], '5v5': [] },
@@ -100,6 +107,17 @@ function normalizeQueueEntry(raw = {}) {
   };
 }
 
+function normalizeFairness(raw = {}) {
+  const base = defaultPlacar().fairness;
+  return {
+    enabled: raw.enabled !== false,
+    activeWindowMinutes: Math.max(10, Number(raw.activeWindowMinutes || base.activeWindowMinutes) || base.activeWindowMinutes),
+    pairWindowMinutes: Math.max(30, Number(raw.pairWindowMinutes || base.pairWindowMinutes) || base.pairWindowMinutes),
+    recentMatchWeight: Math.max(1, Number(raw.recentMatchWeight || base.recentMatchWeight) || base.recentMatchWeight),
+    pairRepeatWeight: Math.max(1, Number(raw.pairRepeatWeight || base.pairRepeatWeight) || base.pairRepeatWeight)
+  };
+}
+
 function normalizePlacar(raw = {}) {
   const base = defaultPlacar();
   const pointsRule = { ...base.pointsRule, ...(raw.pointsRule && typeof raw.pointsRule === 'object' ? raw.pointsRule : {}) };
@@ -123,6 +141,7 @@ function normalizePlacar(raw = {}) {
     ...base,
     ...raw,
     pointsRule,
+    fairness: normalizeFairness(raw.fairness || {}),
     players,
     queues,
     matches: Array.isArray(raw.matches) ? raw.matches.slice(-500) : [],
@@ -164,7 +183,7 @@ async function getLeaderboard(mode = '3v3') {
 async function getFullScoreboard() {
   const [three, five] = await Promise.all([getLeaderboard('3v3'), getLeaderboard('5v5')]);
   const placar = await readPlacar();
-  return { success: true, ranks: RANKS, pointsRule: placar.pointsRule, queues: placar.queues, matches: placar.matches.slice(-30).reverse(), leaderboards: { '3v3': three.players, '5v5': five.players }, updatedAt: placar.updatedAt };
+  return { success: true, ranks: RANKS, pointsRule: placar.pointsRule, fairness: placar.fairness, queues: placar.queues, matches: placar.matches.slice(-30).reverse(), leaderboards: { '3v3': three.players, '5v5': five.players }, updatedAt: placar.updatedAt };
 }
 
 async function addToQueue(mode, player = {}) {
@@ -187,31 +206,128 @@ async function removeFromQueue(mode, discordId = '') {
   return { mode: safeMode, removed: before !== placar.queues[safeMode].length, queue: placar.queues[safeMode] };
 }
 
+function matchTimestamp(match = {}) {
+  const raw = match.finishedAt || match.createdAt || '';
+  const time = Date.parse(raw);
+  return Number.isFinite(time) ? time : 0;
+}
+
+function matchPlayers(match = {}) {
+  return [...(match.teamA || []), ...(match.teamB || [])].map((p) => String(p.discordId || '').trim()).filter(Boolean);
+}
+
+function pairKey(a = '', b = '') {
+  return [String(a), String(b)].sort().join(':');
+}
+
+function recentPlayerActivity(placar, mode, playerId, windowMinutes = 90) {
+  const safeMode = normalizeMode(mode);
+  const now = Date.now();
+  const since = now - windowMinutes * 60 * 1000;
+  const matches = (placar.matches || []).filter((match) => normalizeMode(match.mode) === safeMode && matchTimestamp(match) >= since && matchPlayers(match).includes(String(playerId)));
+  const last = matches.reduce((max, match) => Math.max(max, matchTimestamp(match)), 0);
+  return { recentMatches: matches.length, lastMatchAt: last ? new Date(last).toISOString() : null, lastAgoMinutes: last ? Math.round((now - last) / 60000) : null };
+}
+
+function recentPairCounts(placar, mode, windowMinutes = 240) {
+  const safeMode = normalizeMode(mode);
+  const since = Date.now() - windowMinutes * 60 * 1000;
+  const counts = new Map();
+  (placar.matches || []).forEach((match) => {
+    if (normalizeMode(match.mode) !== safeMode || matchTimestamp(match) < since) return;
+    for (const team of [match.teamA || [], match.teamB || []]) {
+      const ids = team.map((p) => String(p.discordId || '').trim()).filter(Boolean);
+      for (let i = 0; i < ids.length; i += 1) {
+        for (let j = i + 1; j < ids.length; j += 1) {
+          const key = pairKey(ids[i], ids[j]);
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      }
+    }
+  });
+  return counts;
+}
+
+function shuffle(items = []) {
+  return [...items]
+    .map((item) => ({ item, n: Math.random() }))
+    .sort((a, b) => a.n - b.n)
+    .map((entry) => entry.item);
+}
+
+function fairQueuePick(placar, mode, queue, size) {
+  const config = normalizeFairness(placar.fairness || {});
+  const scored = queue.map((entry, index) => {
+    const activity = recentPlayerActivity(placar, mode, entry.discordId, config.activeWindowMinutes);
+    const joined = Date.parse(entry.joinedAt || '') || Date.now();
+    const score = (activity.recentMatches * config.recentMatchWeight) + Math.max(0, Math.round((Date.now() - joined) / -60000));
+    return { entry, index, activity, score, random: Math.random() };
+  });
+  const ordered = config.enabled
+    ? [...scored].sort((a, b) => a.score - b.score || a.index - b.index || a.random - b.random)
+    : scored.slice(0, size);
+  const picked = ordered.slice(0, size);
+  const pickedIds = new Set(picked.map((item) => item.entry.discordId));
+  const leftover = queue.filter((entry) => !pickedIds.has(entry.discordId));
+  const selected = picked.map((item) => item.entry);
+  selected.fairness = {
+    enabled: config.enabled,
+    activeWindowMinutes: config.activeWindowMinutes,
+    pairWindowMinutes: config.pairWindowMinutes,
+    picked: picked.map((item) => ({ discordId: item.entry.discordId, name: item.entry.name, recentMatches: item.activity.recentMatches, lastAgoMinutes: item.activity.lastAgoMinutes })),
+    rotatedToBack: leftover.length,
+    rule: 'prioriza quem jogou menos recentemente quando existe fila sobrando'
+  };
+  return { selected, leftover };
+}
+
 async function popQueueForMatch(mode) {
   const safeMode = normalizeMode(mode);
   const size = safeMode === '5v5' ? 10 : 6;
   const placar = await readPlacar();
-  if ((placar.queues[safeMode] || []).length < size) return null;
-  const selected = placar.queues[safeMode].slice(0, size);
-  placar.queues[safeMode] = placar.queues[safeMode].slice(size);
+  const queue = placar.queues[safeMode] || [];
+  if (queue.length < size) return null;
+  const { selected, leftover } = fairQueuePick(placar, safeMode, queue, size);
+  placar.queues[safeMode] = leftover;
   await writePlacar(placar);
   return selected;
 }
 
-function shuffle(items = []) {
-  return [...items].sort(() => Math.random() - 0.5);
+function teamPairPenalty(team = [], player = {}, pairCounts = new Map()) {
+  return team.reduce((sum, mate) => sum + (pairCounts.get(pairKey(mate.discordId, player.discordId)) || 0), 0);
+}
+
+function balancedTeams(players = [], teamSize = 3, pairCounts = new Map()) {
+  const teamA = [];
+  const teamB = [];
+  shuffle(players).forEach((player) => {
+    if (teamA.length >= teamSize) return teamB.push(player);
+    if (teamB.length >= teamSize) return teamA.push(player);
+    const aPenalty = teamPairPenalty(teamA, player, pairCounts);
+    const bPenalty = teamPairPenalty(teamB, player, pairCounts);
+    if (aPenalty < bPenalty) teamA.push(player);
+    else if (bPenalty < aPenalty) teamB.push(player);
+    else if (teamA.length <= teamB.length) teamA.push(player);
+    else teamB.push(player);
+  });
+  return { teamA, teamB };
 }
 
 async function createMatch(mode, players = [], extra = {}) {
   const safeMode = normalizeMode(mode);
   const teamSize = safeMode === '5v5' ? 5 : 3;
+  const placar = await readPlacar();
+  const config = normalizeFairness(placar.fairness || {});
+  const queueFairness = players.fairness || extra.fairness || null;
   const randomized = shuffle(players).slice(0, teamSize * 2);
+  const pairCounts = recentPairCounts(placar, safeMode, config.pairWindowMinutes);
+  const teams = config.enabled ? balancedTeams(randomized, teamSize, pairCounts) : { teamA: randomized.slice(0, teamSize), teamB: randomized.slice(teamSize, teamSize * 2) };
   const match = {
     id: `placar_${safeMode}_${Date.now()}_${Math.random().toString(16).slice(2)}`,
     mode: safeMode,
     status: 'open',
-    teamA: randomized.slice(0, teamSize),
-    teamB: randomized.slice(teamSize, teamSize * 2),
+    teamA: teams.teamA,
+    teamB: teams.teamB,
     scoreA: null,
     scoreB: null,
     voiceChannelId: String(extra.voiceChannelId || '').trim(),
@@ -219,9 +335,14 @@ async function createMatch(mode, players = [], extra = {}) {
     discordMessageId: String(extra.discordMessageId || '').trim(),
     createdAt: new Date().toISOString(),
     finishedAt: null,
+    fairness: {
+      enabled: config.enabled,
+      queue: queueFairness,
+      teamSplit: 'balanceia jogadores para reduzir dupla repetida nas últimas partidas',
+      pairWindowMinutes: config.pairWindowMinutes
+    },
     result: null
   };
-  const placar = await readPlacar();
   placar.matches.push(match);
   placar.matches = placar.matches.slice(-500);
   await writePlacar(placar);
