@@ -20,7 +20,7 @@ if (!src.includes('function safeChannelName')) {
 function safeChannelName(value = '') {
   return String(value || '')
     .replace(/[\r\n\t]+/g, ' ')
-    .replace(/[@#`]/g, '')
+    .replace(/[@#]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80) || 'time';
