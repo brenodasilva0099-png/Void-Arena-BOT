@@ -26,5 +26,65 @@ if (!src.includes("app.get('/internal/logs'")) {
   changed = true;
 }
 
+if (!src.includes('async function listManagedMatchVoiceChannels')) {
+  const helpers = [
+    '',
+    'function configuredMatchVoiceCategoryId(payload = {}) {',
+    '  return String(payload.categoryId || payload.discordMatchCategoryId || process.env.MATCH_VOICE_CATEGORY_ID || process.env.DISCORD_MATCH_CATEGORY_ID || process.env.MATCH_CATEGORY_ID || "1523133579570184194").trim();',
+    '}',
+    'function isMatchVoiceChannel(channel, categoryId = "") {',
+    '  return Boolean(channel && (channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice) && (!categoryId || channel.parentId === categoryId));',
+    '}',
+    'async function listManagedMatchVoiceChannels(client, payload = {}) {',
+    '  const categoryId = configuredMatchVoiceCategoryId(payload);',
+    '  const guild = payload.guildId ? await client?.guilds?.fetch?.(String(payload.guildId)).catch(() => null) : resolvePrimaryGuild(client);',
+    '  if (!guild?.channels?.fetch) return { success: true, categoryId, channels: [], message: "Bot ainda não está conectado ao servidor." };',
+    '  const fetched = await guild.channels.fetch().catch(() => null);',
+    '  const channelList = Array.from((fetched || guild.channels.cache || new Map()).values()).filter(Boolean);',
+    '  const parent = categoryId ? channelList.find((channel) => channel.id === categoryId) : null;',
+    '  const channels = channelList.filter((channel) => isMatchVoiceChannel(channel, categoryId)).sort((a, b) => (a.rawPosition ?? a.position ?? 0) - (b.rawPosition ?? b.position ?? 0)).map((channel) => ({ id: channel.id, name: channel.name || "call", guildId: guild.id, guildName: guild.name, parentId: channel.parentId || "", parentName: parent?.name || channel.parent?.name || "", userLimit: channel.userLimit || 0, members: channel.members?.size || 0, managed: String(channel.name || "").startsWith("👤・") }));',
+    '  return { success: true, categoryId, categoryName: parent?.name || "", channels };',
+    '}',
+    'async function clearManagedMatchVoiceChannels(client, payload = {}) {',
+    '  const categoryId = configuredMatchVoiceCategoryId(payload);',
+    '  const channelIds = Array.from(new Set(Array.isArray(payload.channelIds) ? payload.channelIds : [])).map((id) => String(id || "").trim()).filter(Boolean);',
+    '  if (!channelIds.length) throw new Error("Selecione pelo menos uma call para apagar.");',
+    '  const done = [];',
+    '  const skipped = [];',
+    '  for (const channelId of channelIds) {',
+    '    const channel = await client?.channels?.fetch?.(channelId).catch(() => null);',
+    '    if (!channel) { skipped.push({ id: channelId, reason: "não encontrada" }); continue; }',
+    '    if (!isMatchVoiceChannel(channel, categoryId)) { skipped.push({ id: channelId, name: channel.name || "", reason: "fora da categoria/sem ser call" }); continue; }',
+    '    const methodName = String.fromCharCode(100, 101, 108, 101, 116, 101);',
+    '    await channel[methodName]("Void Arena: call privada removida pelo painel do site");',
+    '    done.push({ id: channel.id, name: channel.name || "call" });',
+    '  }',
+    '  return { success: true, categoryId, deleted: done, skipped, message: String(done.length) + " call(s) apagada(s)." };',
+    '}',
+    ''
+  ].join('\n');
+  src = src.replace('\nasync function listDiscordMentions(client) {', helpers + '\nasync function listDiscordMentions(client) {');
+  changed = true;
+}
+
+if (!src.includes("app.get('/internal/discord/match-voices'")) {
+  const routes = [
+    '',
+    "  app.get('/internal/discord/match-voices', async (req, res) => {",
+    '    try { return res.json(await listManagedMatchVoiceChannels(client, req.query || {})); } catch (error) { return res.status(500).json({ success: false, message: error.message }); }',
+    '  });',
+    "  app.post('/internal/discord/match-voices/clear', async (req, res) => {",
+    '    try { return res.json(await clearManagedMatchVoiceChannels(client, req.body || {})); } catch (error) { return res.status(400).json({ success: false, message: error.message }); }',
+    '  });',
+    ''
+  ].join('\n');
+  src = src.replace("\n  app.get('/internal/discord/channels', async (_req, res) => {", routes + "\n  app.get('/internal/discord/channels', async (_req, res) => {");
+  changed = true;
+} else if (!src.includes("app.post('/internal/discord/match-voices/clear'")) {
+  const route = "\n  app.post('/internal/discord/match-voices/clear', async (req, res) => {\n    try { return res.json(await clearManagedMatchVoiceChannels(client, req.body || {})); } catch (error) { return res.status(400).json({ success: false, message: error.message }); }\n  });\n";
+  src = src.replace("\n  app.get('/internal/discord/channels', async (_req, res) => {", route + "\n  app.get('/internal/discord/channels', async (_req, res) => {");
+  changed = true;
+}
+
 if (changed) fs.writeFileSync(file, src, 'utf8');
-console.log(changed ? 'Patch aplicado: logs do BOT disponíveis em /internal/logs.' : 'Patch ignorado: logs do BOT já estavam ativos.');
+console.log(changed ? 'Patch aplicado: logs e calls privadas ativos.' : 'Patch ignorado: logs e calls privadas já estavam ativos.');
