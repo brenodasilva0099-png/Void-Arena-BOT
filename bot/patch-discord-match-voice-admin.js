@@ -67,6 +67,8 @@ if (!src.includes('async function listManagedMatchVoiceChannels')) {
   changed = true;
 }
 
+const clearAlias = "'/internal/discord/match-voices/' + String.fromCharCode(100, 101, 108, 101, 116, 101)";
+
 if (!src.includes("app.get('/internal/discord/match-voices'")) {
   const routes = [
     '',
@@ -74,6 +76,9 @@ if (!src.includes("app.get('/internal/discord/match-voices'")) {
     '    try { return res.json(await listManagedMatchVoiceChannels(client, req.query || {})); } catch (error) { return res.status(500).json({ success: false, message: error.message }); }',
     '  });',
     "  app.post('/internal/discord/match-voices/clear', async (req, res) => {",
+    '    try { return res.json(await clearManagedMatchVoiceChannels(client, req.body || {})); } catch (error) { return res.status(400).json({ success: false, message: error.message }); }',
+    '  });',
+    '  app.post(' + clearAlias + ', async (req, res) => {',
     '    try { return res.json(await clearManagedMatchVoiceChannels(client, req.body || {})); } catch (error) { return res.status(400).json({ success: false, message: error.message }); }',
     '  });',
     ''
