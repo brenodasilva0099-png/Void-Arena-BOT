@@ -11,6 +11,13 @@ if (!src.includes("require('./placarDebugCommand')")) {
   );
 }
 
+if (!src.includes("require('./rematchRolePanel')")) {
+  src = src.replace(
+    "const { registerLegalCommands } = require('./legalCommands');",
+    "const { registerLegalCommands } = require('./legalCommands');\nconst { registerRematchRolePanel } = require('./rematchRolePanel');"
+  );
+}
+
 if (!src.includes('registerPlacarDebugCommand(client);')) {
   src = src.replace(
     '  registerPlacarSystem(client);',
@@ -18,5 +25,12 @@ if (!src.includes('registerPlacarDebugCommand(client);')) {
   );
 }
 
+if (!src.includes('registerRematchRolePanel(client);')) {
+  src = src.replace(
+    '  registerLegalCommands(client);',
+    '  registerLegalCommands(client);\n  registerRematchRolePanel(client);'
+  );
+}
+
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comando !placar-preview registrado.');
+console.log('Patch aplicado: comandos preview e painel de cargos Rematch registrados.');
