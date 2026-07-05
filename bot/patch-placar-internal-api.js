@@ -52,6 +52,8 @@ function patchPlacarSystem() {
     .replace("match = await placar.attachMatchMessage(match.id, { voiceChannelId: voiceChannel.id, textChannelId: PLACAR_CHANNEL_ID });", "match = await placar.attachMatchMessage(match.id, { voiceChannelId: voiceChannel.id, textChannelId: QUEUE_CHANNEL_ID });")
     .replace('const channel = await client.channels.fetch(PLACAR_CHANNEL_ID).catch(() => sourceChannel);', 'const channel = await client.channels.fetch(QUEUE_CHANNEL_ID).catch(() => sourceChannel);');
 
+  src = src.replace(/function matchRows\(match\) \{[\s\S]*?\n\}/, `function matchRows(match) {\n  return [new ActionRowBuilder().addComponents(\n    new ButtonBuilder().setCustomId(\`placar:result:\${match.id}\`).setLabel('Reportar resultado').setEmoji('📝').setStyle(ButtonStyle.Primary)\n  )];\n}`);
+
   src = src.replace(/,\s*new ActionRowBuilder\(\)\.addComponents\(\s*new ButtonBuilder\(\)\.setCustomId\('placar:ranking:3v3'\)[\s\S]*?\.setCustomId\('placar:ranking:5v5'\)[\s\S]*?\.setStyle\(ButtonStyle\.Secondary\)\s*\)/, '');
 
   const rankingMarker = '// VOID_ARENA_RANKING_PANEL_FUNCTIONS';
