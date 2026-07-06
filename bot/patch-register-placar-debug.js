@@ -17,6 +17,13 @@ if (!src.includes("require('./placarDebugCommand')")) {
   );
 }
 
+if (!src.includes("require('./placarAttachmentResult')")) {
+  src = src.replace(
+    "const { registerPlacarDebugCommand } = require('./placarDebugCommand');",
+    "const { registerPlacarDebugCommand } = require('./placarDebugCommand');\nconst { registerPlacarAttachmentResult } = require('./placarAttachmentResult');"
+  );
+}
+
 if (!src.includes("require('./placarFormPreviewCommand')")) {
   src = src.replace(
     "const { registerPlacarDebugCommand } = require('./placarDebugCommand');",
@@ -28,6 +35,13 @@ if (!src.includes("require('./rematchRolePanel')")) {
   src = src.replace(
     "const { registerLegalCommands } = require('./legalCommands');",
     "const { registerLegalCommands } = require('./legalCommands');\nconst { registerRematchRolePanel } = require('./rematchRolePanel');"
+  );
+}
+
+if (!src.includes('registerPlacarAttachmentResult(client);')) {
+  src = src.replace(
+    '  registerPlacarSystem(client);',
+    '  registerPlacarAttachmentResult(client);\n  registerPlacarSystem(client);'
   );
 }
 
@@ -53,4 +67,4 @@ if (!src.includes('registerRematchRolePanel(client);')) {
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comandos preview, formulário placar e painel de cargos Rematch registrados.');
+console.log('Patch aplicado: comandos preview, formulário placar por anexo e painel de cargos Rematch registrados.');
