@@ -5,6 +5,13 @@ const filePath = path.join(__dirname, '..', 'server', 'storage.js');
 let source = fs.readFileSync(filePath, 'utf8');
 let changed = false;
 
+try {
+  require('./patch-discord-data-backup');
+} catch (error) {
+  console.error('Patch backup do banco em canal falhou:', error.message);
+  source = fs.readFileSync(filePath, 'utf8');
+}
+
 if (!source.includes('entryFee: String(raw.entryFee || raw.registrationFee')) {
   source = source.replace(
     "    description: String(raw.description || 'Campeonato principal da comunidade. Inscreva seu time, confira o limite de vagas e envie o comprovante pelo ticket do Discord.').trim().slice(0, 260),\n    logo:",
