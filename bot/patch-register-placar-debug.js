@@ -29,6 +29,13 @@ if (!src.includes("require('./placarDebugCommand')")) {
   );
 }
 
+if (!src.includes("require('./groupStandingsFromResults')")) {
+  src = src.replace(
+    "const { registerPlacarSystem } = require('./placarSystem');",
+    "const { registerPlacarSystem } = require('./placarSystem');\nconst { registerGroupStandingsFromResults } = require('./groupStandingsFromResults');"
+  );
+}
+
 if (!src.includes("require('./placarAttachmentResult')")) {
   src = src.replace(
     "const { registerPlacarDebugCommand } = require('./placarDebugCommand');",
@@ -57,6 +64,13 @@ if (!src.includes('registerPlacarAttachmentResult(client);')) {
   );
 }
 
+if (!src.includes('registerGroupStandingsFromResults(client);')) {
+  src = src.replace(
+    '  registerPlacarSystem(client);',
+    '  registerPlacarSystem(client);\n  registerGroupStandingsFromResults(client);'
+  );
+}
+
 if (!src.includes('registerPlacarDebugCommand(client);')) {
   src = src.replace(
     '  registerPlacarSystem(client);',
@@ -79,4 +93,4 @@ if (!src.includes('registerRematchRolePanel(client);')) {
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comandos preview, formulário placar por anexo e painel de cargos Rematch registrados.');
+console.log('Patch aplicado: comandos preview, formulário placar, grupos por resultados e painel de cargos Rematch registrados.');
