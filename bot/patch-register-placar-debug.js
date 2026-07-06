@@ -7,6 +7,18 @@ try {
   console.error('Patch formulário placar falhou:', error.message);
 }
 
+try {
+  const placarFile = path.join(__dirname, 'placarSystem.js');
+  if (fs.existsSync(placarFile)) {
+    let placarSrc = fs.readFileSync(placarFile, 'utf8');
+    placarSrc = placarSrc.replace("if (action === 'result') return handleResultButton(interaction, value);", "if (action === 'result') return;");
+    placarSrc = placarSrc.replace("if (action === 'result') return interaction.showModal(resultModal(value));", "if (action === 'result') return;");
+    fs.writeFileSync(placarFile, placarSrc, 'utf8');
+  }
+} catch (error) {
+  console.error('Patch dono do botão de placar falhou:', error.message);
+}
+
 const file = path.join(__dirname, 'discordClient.js');
 let src = fs.readFileSync(file, 'utf8');
 
