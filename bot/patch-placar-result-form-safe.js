@@ -43,4 +43,5 @@ if (fs.existsSync(file)) {
 }
 
 require('./patch-placar-result-form');
+try { require('./patch-placar-form-preview-handler'); } catch (error) { console.error('Patch preview formulário placar falhou:', error.message); }
 console.log('Patch seguro aplicado: formulário validado do placar.');
