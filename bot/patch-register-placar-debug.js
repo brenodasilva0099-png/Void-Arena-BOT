@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 try {
-  require('./patch-placar-result-form');
+  require('./patch-placar-result-form-safe');
 } catch (error) {
   console.error('Patch formulário placar falhou:', error.message);
 }
