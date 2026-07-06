@@ -21,7 +21,7 @@ if (!src.includes('teamADiscordIds: teamDiscordIds(teamA, users)')) {
 }
 
 if (!src.includes('function matchVoiceViewOnlyRoleIds')) {
-  const helpers = `
+  const helpers = String.raw`
 function envList(name, fallback = '') {
   return String(process.env[name] || fallback).split(',').map((item) => item.trim()).filter(Boolean);
 }
