@@ -17,6 +17,13 @@ if (!src.includes("require('./placarDebugCommand')")) {
   );
 }
 
+if (!src.includes("require('./placarFormPreviewCommand')")) {
+  src = src.replace(
+    "const { registerPlacarDebugCommand } = require('./placarDebugCommand');",
+    "const { registerPlacarDebugCommand } = require('./placarDebugCommand');\nconst { registerPlacarFormPreviewCommand } = require('./placarFormPreviewCommand');"
+  );
+}
+
 if (!src.includes("require('./rematchRolePanel')")) {
   src = src.replace(
     "const { registerLegalCommands } = require('./legalCommands');",
@@ -28,6 +35,13 @@ if (!src.includes('registerPlacarDebugCommand(client);')) {
   src = src.replace(
     '  registerPlacarSystem(client);',
     '  registerPlacarSystem(client);\n  registerPlacarDebugCommand(client);'
+  );
+}
+
+if (!src.includes('registerPlacarFormPreviewCommand(client);')) {
+  src = src.replace(
+    '  registerPlacarDebugCommand(client);',
+    '  registerPlacarDebugCommand(client);\n  registerPlacarFormPreviewCommand(client);'
   );
 }
 
