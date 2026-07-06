@@ -1,6 +1,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+try {
+  require('./patch-placar-result-form');
+} catch (error) {
+  console.error('Patch formulário placar falhou:', error.message);
+}
+
 const file = path.join(__dirname, 'discordClient.js');
 let src = fs.readFileSync(file, 'utf8');
 
@@ -33,4 +39,4 @@ if (!src.includes('registerRematchRolePanel(client);')) {
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comandos preview e painel de cargos Rematch registrados.');
+console.log('Patch aplicado: comandos preview, formulário placar e painel de cargos Rematch registrados.');
