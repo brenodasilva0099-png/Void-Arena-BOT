@@ -21,12 +21,11 @@ function replaceFunction(src, name, replacement) {
   return src;
 }
 
-function patchStorage() {
-  const file = path.join(__dirname, 'placarStorage.js');
-  if (!fs.existsSync(file)) return;
-  let src = fs.readFileSync(file, 'utf8');
+function source(fn, targetName) {
+  return fn.toString().replace(fn.name, targetName);
+}
 
-  const attach = String.raw`async function attachMatchMessage(matchId, payload = {}) {
+async function attachMatchMessageReplacement(matchId, payload = {}) {
   const placar = await readPlacar();
   const match = placar.matches.find((item) => item.id === matchId);
   if (!match) throw new Error('Partida não encontrada.');
@@ -40,18 +39,9 @@ function patchStorage() {
   match.teamVoiceChannels = Array.isArray(payload.teamVoiceChannels) ? payload.teamVoiceChannels : (Array.isArray(match.teamVoiceChannels) ? match.teamVoiceChannels : []);
   await writePlacar(placar);
   return match;
-}`;
-
-  src = replaceFunction(src, 'attachMatchMessage', attach);
-  fs.writeFileSync(file, src, 'utf8');
 }
 
-function patchSystem() {
-  const file = path.join(__dirname, 'placarSystem.js');
-  if (!fs.existsSync(file)) return;
-  let src = fs.readFileSync(file, 'utf8');
-
-  const embed = String.raw`function matchEmbed(match) {
+function matchEmbedReplacement(match) {
   const teamA = (match.teamA || []).map((p) => `<@${p.discordId}>`).join('\n');
   const teamB = (match.teamB || []).map((p) => `<@${p.discordId}>`).join('\n');
   const callA = match.teamAVoiceChannelId || match.voiceChannelAId || '';
@@ -71,9 +61,9 @@ function patchSystem() {
       'Quando acabar, um participante clica em **Atualizar placar**. Só quem clicar primeiro consegue enviar/validar esse placar.'
     ].filter(Boolean).join('\n'))
     .setTimestamp(new Date());
-}`;
+}
 
-  const createVoice = String.raw`async function createPrivateVoiceForMatch(guild, sourceChannel, match) {
+async function createPrivateVoiceForMatchReplacement(guild, sourceChannel, match) {
   const suffix = String(Date.now()).slice(-4);
   const parentId = String(
     process.env.PLACAR_MATCH_CATEGORY_ID ||
@@ -133,9 +123,9 @@ function patchSystem() {
       { team: 'B', id: teamBChannel.id, name: teamBChannel.name }
     ]
   };
-}`;
+}
 
-  const move = String.raw`async function moveOrDmPlayers(guild, match, voiceChannels) {
+async function moveOrDmPlayersReplacement(guild, match, voiceChannels) {
   const teamAChannel = voiceChannels?.teamA || voiceChannels;
   const teamBChannel = voiceChannels?.teamB || voiceChannels;
   const moveTeam = async (players = [], channel, label) => {
@@ -161,9 +151,9 @@ function patchSystem() {
   };
   await moveTeam(match.teamA || [], teamAChannel, 'A');
   await moveTeam(match.teamB || [], teamBChannel, 'B');
-}`;
+}
 
-  const start = String.raw`async function maybeStartMatch(client, interaction, mode) {
+async function maybeStartMatchReplacement(client, interaction, mode) {
   const selected = await placar.popQueueForMatch(mode);
   if (!selected) return null;
   const guild = interaction.guild;
@@ -205,12 +195,24 @@ function patchSystem() {
   await ensureQueuePanel(client);
   await ensureRankingPanel(client).catch(() => null);
   return match;
-}`;
+}
 
-  src = replaceFunction(src, 'matchEmbed', embed);
-  src = replaceFunction(src, 'createPrivateVoiceForMatch', createVoice);
-  src = replaceFunction(src, 'moveOrDmPlayers', move);
-  src = replaceFunction(src, 'maybeStartMatch', start);
+function patchStorage() {
+  const file = path.join(__dirname, 'placarStorage.js');
+  if (!fs.existsSync(file)) return;
+  let src = fs.readFileSync(file, 'utf8');
+  src = replaceFunction(src, 'attachMatchMessage', source(attachMatchMessageReplacement, 'attachMatchMessage'));
+  fs.writeFileSync(file, src, 'utf8');
+}
+
+function patchSystem() {
+  const file = path.join(__dirname, 'placarSystem.js');
+  if (!fs.existsSync(file)) return;
+  let src = fs.readFileSync(file, 'utf8');
+  src = replaceFunction(src, 'matchEmbed', source(matchEmbedReplacement, 'matchEmbed'));
+  src = replaceFunction(src, 'createPrivateVoiceForMatch', source(createPrivateVoiceForMatchReplacement, 'createPrivateVoiceForMatch'));
+  src = replaceFunction(src, 'moveOrDmPlayers', source(moveOrDmPlayersReplacement, 'moveOrDmPlayers'));
+  src = replaceFunction(src, 'maybeStartMatch', source(maybeStartMatchReplacement, 'maybeStartMatch'));
   fs.writeFileSync(file, src, 'utf8');
 }
 
