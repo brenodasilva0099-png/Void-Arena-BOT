@@ -80,10 +80,13 @@ async function queuePanelEmbedReplacement() {
 const file = path.join(__dirname, 'placarSystem.js');
 if (fs.existsSync(file)) {
   let src = fs.readFileSync(file, 'utf8');
-  if (!src.includes('function queuePlayerMention')) {
-    src = src.replace('\nasync function queuePanelEmbed', '\n' + source(queuePlayerMentionReplacement, 'queuePlayerMention') + '\n\nasync function queuePanelEmbed');
+  const helpers = source(queuePlayerMentionReplacement, 'queuePlayerMention') + '\n\n' + source(queueNamesLineReplacement, 'queueNamesLine') + '\n\n';
+  if (!src.includes('function queuePlayerMention') && !src.includes('function queueNamesLine')) {
+    src = src.replace('\nasync function queuePanelEmbed', '\n' + helpers + 'async function queuePanelEmbed');
+  } else {
+    if (!src.includes('function queuePlayerMention')) src = src.replace('\nfunction queueNamesLine', '\n' + source(queuePlayerMentionReplacement, 'queuePlayerMention') + '\n\nfunction queueNamesLine');
+    src = replaceFunction(src, 'queueNamesLine', source(queueNamesLineReplacement, 'queueNamesLine'));
   }
-  src = replaceFunction(src, 'queueNamesLine', source(queueNamesLineReplacement, 'queueNamesLine'));
   src = replaceFunction(src, 'queuePanelEmbed', source(queuePanelEmbedReplacement, 'queuePanelEmbed'));
   fs.writeFileSync(file, src, 'utf8');
 }
