@@ -14,6 +14,12 @@ try {
 }
 
 try {
+  require('./patch-placar-cleanup-after-result');
+} catch (error) {
+  console.error('Patch limpeza pós-resultado do placar falhou:', error.message);
+}
+
+try {
   const placarFile = path.join(__dirname, 'placarSystem.js');
   if (fs.existsSync(placarFile)) {
     let placarSrc = fs.readFileSync(placarFile, 'utf8');
@@ -99,4 +105,4 @@ if (!src.includes('registerRematchRolePanel(client);')) {
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comandos preview, formulário placar, calls Time A/B, grupos por resultados e painel de cargos Rematch registrados.');
+console.log('Patch aplicado: comandos preview, formulário placar, calls Time A/B, limpeza pós-resultado, grupos por resultados e painel de cargos Rematch registrados.');
