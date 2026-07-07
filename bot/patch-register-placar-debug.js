@@ -14,6 +14,12 @@ try {
 }
 
 try {
+  require('./patch-placar-storage-voice-fields-safe');
+} catch (error) {
+  console.error('Patch reparo storage calls Time A/B falhou:', error.message);
+}
+
+try {
   require('./patch-placar-cleanup-after-result');
 } catch (error) {
   console.error('Patch limpeza pós-resultado do placar falhou:', error.message);
@@ -105,4 +111,4 @@ if (!src.includes('registerRematchRolePanel(client);')) {
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comandos preview, formulário placar, calls Time A/B, limpeza pós-resultado, grupos por resultados e painel de cargos Rematch registrados.');
+console.log('Patch aplicado: comandos preview, formulário placar, calls Time A/B, storage seguro, limpeza pós-resultado, grupos por resultados e painel de cargos Rematch registrados.');
