@@ -79,11 +79,16 @@ async function createPrivateVoiceForMatchReplacement(guild, sourceChannel, match
     .split(',').map((id) => id.trim()).filter(Boolean);
   const connectRoleIds = String(process.env.MATCH_VOICE_CONNECT_ROLE_IDS || '1523438475716853851')
     .split(',').map((id) => id.trim()).filter(Boolean);
+  const botId = String(guild.client?.user?.id || guild.members?.me?.id || '').trim();
 
   const makeOverwrites = (players = []) => {
     const allowedIds = [...new Set(players.map((p) => String(p.discordId || '').trim()).filter(Boolean))];
     return [
       { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect] },
+      ...(botId ? [{
+        id: botId,
+        allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.Connect, PermissionsBitField.Flags.Speak, PermissionsBitField.Flags.Stream, PermissionsBitField.Flags.UseVAD, PermissionsBitField.Flags.ManageChannels, PermissionsBitField.Flags.MoveMembers]
+      }] : []),
       ...viewOnlyRoleIds.map((id) => ({
         id,
         allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.ReadMessageHistory],
@@ -132,10 +137,16 @@ async function moveOrDmPlayersReplacement(guild, match, voiceChannels) {
     if (!channel?.id) return;
     const link = `https://discord.com/channels/${guild.id}/${channel.id}`;
     for (const player of players) {
-      const member = await guild.members.fetch(player.discordId).catch(() => null);
+      const member = await guild.members.fetch(player.discordId).catch((error) => {
+        console.error('[placar] buscar membro para mover:', player.discordId, error.message);
+        return null;
+      });
       if (!member) continue;
       if (member.voice?.channelId) {
-        await member.voice.setChannel(channel).catch(async () => {
+        await member.voice.setChannel(channel.id).then(() => {
+          console.log(`[placar] ${member.user?.tag || member.id} movido para Time ${label}`);
+        }).catch(async (error) => {
+          console.error('[placar] mover jogador para call:', member.id, error.message);
           await member.send(`⚽ Sua partida ${modeLabel(match.mode)} foi encontrada. Você caiu no **Time ${label}**. Entre na call: ${link}`).catch(() => null);
         });
       } else {
@@ -218,4 +229,4 @@ function patchSystem() {
 
 patchStorage();
 patchSystem();
-console.log('Patch aplicado: placar cria calls separadas para Time A e Time B.');
+console.log('Patch aplicado: placar cria calls Time A/B, permite bot nas calls e registra movimentos.');
