@@ -26,6 +26,12 @@ try {
 }
 
 try {
+  require('./patch-placar-queue-player-names');
+} catch (error) {
+  console.error('Patch nomes dos jogadores na fila falhou:', error.message);
+}
+
+try {
   const placarFile = path.join(__dirname, 'placarSystem.js');
   if (fs.existsSync(placarFile)) {
     let placarSrc = fs.readFileSync(placarFile, 'utf8');
@@ -111,4 +117,4 @@ if (!src.includes('registerRematchRolePanel(client);')) {
 }
 
 fs.writeFileSync(file, src, 'utf8');
-console.log('Patch aplicado: comandos preview, formulário placar, calls Time A/B, storage seguro, limpeza pós-resultado, grupos por resultados e painel de cargos Rematch registrados.');
+console.log('Patch aplicado: comandos preview, formulário placar, calls Time A/B, storage seguro, limpeza pós-resultado, nomes na fila, grupos por resultados e painel de cargos Rematch registrados.');
