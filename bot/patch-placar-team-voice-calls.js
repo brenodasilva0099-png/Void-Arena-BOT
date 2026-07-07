@@ -64,7 +64,6 @@ function matchEmbedReplacement(match) {
 }
 
 async function createPrivateVoiceForMatchReplacement(guild, sourceChannel, match) {
-  const suffix = String(Date.now()).slice(-4);
   const parentId = String(
     process.env.PLACAR_MATCH_CATEGORY_ID ||
     process.env.MATCH_VOICE_CATEGORY_ID ||
@@ -105,8 +104,9 @@ async function createPrivateVoiceForMatchReplacement(guild, sourceChannel, match
     ];
   };
 
+  const cafeCallSuffix = `${modeLabel(match.mode)}-☕𝑪𝒂𝒇𝒆-𝒄𝒐𝒎-𝑳𝒆𝒊𝒕𝒆𝒆`;
   const createTeamCall = async (letter, players = []) => guild.channels.create({
-    name: `👤・Time ${letter} • ${modeLabel(match.mode)}-${suffix}`,
+    name: `👤・Time ${letter} • ${cafeCallSuffix}`,
     type: ChannelType.GuildVoice,
     parent: parentId || undefined,
     userLimit: 7,
@@ -229,4 +229,4 @@ function patchSystem() {
 
 patchStorage();
 patchSystem();
-console.log('Patch aplicado: placar cria calls Time A/B, permite bot nas calls e registra movimentos.');
+console.log('Patch aplicado: placar cria calls Time A/B com nome Café com Leite.');
