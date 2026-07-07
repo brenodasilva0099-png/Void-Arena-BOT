@@ -25,11 +25,22 @@ function source(fn, targetName) {
   return fn.toString().replace(fn.name, targetName);
 }
 
-function cleanQueuePlayerNameReplacement(player = {}, index = 0) {
+function queuePlayerMentionReplacement(player = {}, index = 0) {
+  const id = String(player.discordId || player.id || '').trim();
+  if (id && id.length >= 8 && id.length <= 25 && id.split('').every((ch) => ch >= '0' && ch <= '9')) return `<@${id}>`;
   const raw = player.name || player.displayName || player.username || player.globalName || '';
   const cleaned = String(raw || '')
-    .replace(/[\n\r\t]+/g, ' ')
-    .replace(/[@#`*_~>|]/g, '')
+    .split('\n').join(' ')
+    .split('\r').join(' ')
+    .split('\t').join(' ')
+    .split('@').join('')
+    .split('#').join('')
+    .split('`').join('')
+    .split('*').join('')
+    .split('_').join('')
+    .split('~').join('')
+    .split('>').join('')
+    .split('|').join('')
     .replace(/\s+/g, ' ')
     .trim();
   return cleaned.slice(0, 24) || `Jogador ${index + 1}`;
@@ -37,7 +48,7 @@ function cleanQueuePlayerNameReplacement(player = {}, index = 0) {
 
 function queueNamesLineReplacement(queue = [], max = 10) {
   if (!Array.isArray(queue) || !queue.length) return '— ninguém na fila ainda';
-  const names = queue.slice(0, max).map((player, index) => `${index + 1}. ${cleanQueuePlayerName(player, index)}`);
+  const names = queue.slice(0, max).map((player, index) => `${index + 1}. ${queuePlayerMention(player, index)}`);
   const extra = queue.length > max ? `\n+${queue.length - max} jogador(es)` : '';
   return names.join('\n') + extra;
 }
@@ -69,11 +80,12 @@ async function queuePanelEmbedReplacement() {
 const file = path.join(__dirname, 'placarSystem.js');
 if (fs.existsSync(file)) {
   let src = fs.readFileSync(file, 'utf8');
-  if (!src.includes('function cleanQueuePlayerName')) {
-    src = src.replace('\nasync function queuePanelEmbed', '\n' + source(cleanQueuePlayerNameReplacement, 'cleanQueuePlayerName') + '\n\n' + source(queueNamesLineReplacement, 'queueNamesLine') + '\n\nasync function queuePanelEmbed');
+  if (!src.includes('function queuePlayerMention')) {
+    src = src.replace('\nasync function queuePanelEmbed', '\n' + source(queuePlayerMentionReplacement, 'queuePlayerMention') + '\n\nasync function queuePanelEmbed');
   }
+  src = replaceFunction(src, 'queueNamesLine', source(queueNamesLineReplacement, 'queueNamesLine'));
   src = replaceFunction(src, 'queuePanelEmbed', source(queuePanelEmbedReplacement, 'queuePanelEmbed'));
   fs.writeFileSync(file, src, 'utf8');
 }
 
-console.log('Patch aplicado: painel da fila mostra nomes dos jogadores.');
+console.log('Patch aplicado: painel da fila mostra menções clicáveis dos jogadores.');
