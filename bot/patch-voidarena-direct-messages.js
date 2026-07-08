@@ -40,6 +40,41 @@ async function fetchPublicDiscordUser(client, discordId = '') {
   };
 }
 
+async function saveDmHistory(storage, discordId = '', entry = {}) {
+  const id = cleanDiscordId(discordId);
+  if (!id || !storage?.saveChatMessage) return null;
+  const createdAt = entry.createdAt || new Date().toISOString();
+  return storage.saveChatMessage({
+    channelId: dmChannelId(id),
+    source: entry.source || 'discord-bot',
+    authorId: entry.authorId || 'void-arena-bot',
+    authorName: entry.authorName || 'Void Arena Bot',
+    authorAvatar: entry.authorAvatar || '',
+    content: JSON.stringify({ type: 'voidarena_dm_log', direction: entry.direction || 'outbound', discordId: id, text: String(entry.text || '').slice(0, 1800), deliveredToDiscord: entry.deliveredToDiscord !== false, discordChannelId: entry.discordChannelId || '', discordMessageId: entry.discordMessageId || '', meta: entry.meta || {}, createdAt }),
+    attachments: [],
+    createdAt
+  }).catch(() => null);
+}
+
+async function deliverPlayerMessage(client, storage, payload = {}) {
+  const id = cleanDiscordId(payload.discordId || payload.userId || '');
+  const content = String(payload.content || payload.message || '').trim().slice(0, 1800);
+  if (!id) throw new Error('Informe o Discord ID do jogador.');
+  if (!content) throw new Error('Digite a mensagem.');
+  const user = await client.users.fetch(id, { force: true }).catch(() => null);
+  if (!user) throw new Error('Usuario Discord nao encontrado.');
+  let sent = null;
+  try {
+    const dm = await user.createDM();
+    sent = await dm.send({ content, allowedMentions: { parse: [] } });
+  } catch (error) {
+    await saveDmHistory(storage, id, { text: content, deliveredToDiscord: false, meta: payload.meta || {}, authorId: payload.authorId || 'void-arena-bot', authorName: payload.authorName || 'Void Arena Bot' });
+    throw new Error('Nao foi possivel entregar a mensagem para esse jogador: ' + error.message);
+  }
+  await saveDmHistory(storage, id, { text: content, deliveredToDiscord: true, discordChannelId: sent.channelId || '', discordMessageId: sent.id || '', meta: payload.meta || {}, authorId: payload.authorId || 'void-arena-bot', authorName: payload.authorName || 'Void Arena Bot' });
+  return { success: true, deliveredToDiscord: true, discordId: id, discordChannelId: sent.channelId || '', discordMessageId: sent.id || '', user: { id: user.id, name: userLabel(user), username: user.username || '', avatar: userAvatar(user, 128) } };
+}
+
 function parseDmHistory(message = {}) {
   let data = null;
   try { data = JSON.parse(message.content || '{}'); } catch {}
@@ -73,6 +108,14 @@ function installVoidArenaDirectMessageRoutes({ client, storage } = {}) {
           return res.status(404).json({ success: false, message: error.message });
         }
       });
+      this.post('/internal/discord/message-player', async (req, res) => {
+        try {
+          const result = await deliverPlayerMessage(client, storage, req.body || {});
+          return res.json(result);
+        } catch (error) {
+          return res.status(500).json({ success: false, deliveredToDiscord: false, message: error.message, dmError: error.message });
+        }
+      });
       this.get('/internal/discord/dm-history/:discordId', async (req, res) => {
         try {
           const id = cleanDiscordId(req.params.discordId);
@@ -83,7 +126,7 @@ function installVoidArenaDirectMessageRoutes({ client, storage } = {}) {
           return res.status(400).json({ success: false, message: error.message, messages: [] });
         }
       });
-      console.log('API interna de consulta de DMs Void Arena registrada.');
+      console.log('API interna de DMs Void Arena registrada.');
     }
     return originalListen.apply(this, args);
   };
