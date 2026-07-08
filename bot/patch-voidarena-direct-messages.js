@@ -19,7 +19,27 @@ function userLabel(user) {
 }
 
 function userAvatar(user, size = 128) {
-  return user?.displayAvatarURL?.({ size }) || '';
+  return user?.displayAvatarURL?.({ extension: 'png', size }) || user?.displayAvatarURL?.({ size }) || '';
+}
+
+function currentBotBrand(client) {
+  const user = client?.user || null;
+  const guild = client?.guilds?.cache?.first?.() || null;
+  return {
+    success: true,
+    bot: user ? {
+      id: user.id,
+      name: user.globalName || user.username || 'Void Arena',
+      username: user.username || 'Void Arena',
+      tag: user.tag || user.username || 'Void Arena',
+      avatar: userAvatar(user, 256)
+    } : null,
+    guild: guild ? {
+      id: guild.id,
+      name: guild.name,
+      icon: guild.iconURL?.({ extension: 'png', size: 256 }) || null
+    } : null
+  };
 }
 
 async function fetchPublicDiscordUser(client, discordId = '') {
@@ -100,6 +120,13 @@ function installVoidArenaDirectMessageRoutes({ client, storage } = {}) {
   express.application.listen = function patchedListen(...args) {
     if (!this.__voidArenaDmRoutes) {
       this.__voidArenaDmRoutes = true;
+      this.get('/internal/discord/bot-brand', async (_req, res) => {
+        try {
+          return res.json(currentBotBrand(client));
+        } catch (error) {
+          return res.status(500).json({ success: false, message: error.message });
+        }
+      });
       this.get('/internal/discord/user/:discordId', async (req, res) => {
         try {
           const user = await fetchPublicDiscordUser(client, req.params.discordId);
@@ -126,7 +153,7 @@ function installVoidArenaDirectMessageRoutes({ client, storage } = {}) {
           return res.status(400).json({ success: false, message: error.message, messages: [] });
         }
       });
-      console.log('API interna de DMs Void Arena registrada.');
+      console.log('API interna de DMs e marca Void Arena registrada.');
     }
     return originalListen.apply(this, args);
   };
