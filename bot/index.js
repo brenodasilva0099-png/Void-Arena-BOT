@@ -3,12 +3,15 @@ require('dotenv').config();
 const { createDiscordClient, startDiscordBot } = require('./discordClient');
 const { startInternalApi } = require('./internalApi');
 const { startEventDmSync } = require('./eventDmSync');
+const { installVoidArenaDirectMessageRoutes } = require('./patch-voidarena-direct-messages');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { runDeployDatabaseGuard } = require('../server/deployDatabaseGuard');
 
 const client = createDiscordClient();
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
+
+installVoidArenaDirectMessageRoutes({ client, storage });
 
 function startScheduledBackups() {
   const enabled = String(process.env.GITHUB_BACKUP_SCHEDULED || 'true').toLowerCase() !== 'false';
