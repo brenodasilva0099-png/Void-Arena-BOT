@@ -13,6 +13,7 @@ const { registerPlayerApplications } = require('./playerApplications');
 const { registerMatchResultHandlers } = require('./matchResults');
 const { registerPlacarSystem } = require('./placarSystem');
 const { registerLegalCommands } = require('./legalCommands');
+const { installRematchAnnouncement } = require('./oneTimeRematchAnnouncement');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
@@ -112,6 +113,7 @@ function registerDiscordHandlers(client) {
   registerMatchResultHandlers(client);
   registerPlacarSystem(client);
   registerLegalCommands(client);
+  installRematchAnnouncement(client);
 
   client.once(Events.ClientReady, (readyClient) => {
     console.log(`✅ Bot online como ${readyClient.user.tag}`);
