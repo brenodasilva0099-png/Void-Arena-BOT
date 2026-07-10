@@ -12,26 +12,57 @@ function normalizeId(value = '') {
   return String(value || '').trim();
 }
 
-async function readTombstones() {
+function timeMs(value = '') {
+  const ms = new Date(value || '').getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+async function readTombstoneData() {
   try {
     const raw = await fs.readFile(TOMBSTONE_FILE, 'utf8');
     const parsed = JSON.parse(raw || '{}');
+    const fallbackDeletedAt = parsed.updatedAt || null;
     const items = Array.isArray(parsed) ? parsed : parsed.deletedTeamIds;
-    return new Set((Array.isArray(items) ? items : []).map(normalizeId).filter(Boolean));
+    const records = new Map();
+
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      const id = normalizeId(typeof item === 'string' ? item : item?.id || item?.teamId);
+      if (!id) return;
+      records.set(id, {
+        id,
+        deletedAt: typeof item === 'object' && item?.deletedAt ? item.deletedAt : fallbackDeletedAt
+      });
+    });
+
+    return { records, updatedAt: fallbackDeletedAt };
   } catch {
-    return new Set();
+    return { records: new Map(), updatedAt: null };
   }
 }
 
-async function writeTombstones(ids) {
+async function readTombstones() {
+  const data = await readTombstoneData();
+  return new Set(data.records.keys());
+}
+
+async function writeTombstoneRecords(records) {
   await fs.mkdir(DATA_DIR, { recursive: true });
+  const now = new Date().toISOString();
   const payload = {
-    deletedTeamIds: Array.from(ids).sort(),
-    updatedAt: new Date().toISOString()
+    deletedTeamIds: Array.from(records.values())
+      .map((record) => ({ id: record.id, deletedAt: record.deletedAt || now }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    updatedAt: now
   };
   const temp = `${TOMBSTONE_FILE}.tmp`;
   await fs.writeFile(temp, JSON.stringify(payload, null, 2));
   await fs.rename(temp, TOMBSTONE_FILE);
+}
+
+async function writeTombstones(ids) {
+  const now = new Date().toISOString();
+  const records = new Map(Array.from(ids).map((id) => [normalizeId(id), { id: normalizeId(id), deletedAt: now }]).filter(([id]) => id));
+  return writeTombstoneRecords(records);
 }
 
 function queueWrite(task) {
@@ -40,14 +71,22 @@ function queueWrite(task) {
   return run;
 }
 
+function teamIsNewerThanDeletion(team = {}, record = {}) {
+  const deletedAt = timeMs(record.deletedAt);
+  if (!deletedAt) return false;
+  const createdAt = timeMs(team.createdAt);
+  const updatedAt = timeMs(team.updatedAt);
+  return Math.max(createdAt, updatedAt) > deletedAt;
+}
+
 async function forgetDeletedTeamId(teamId = '') {
   const id = normalizeId(teamId);
   if (!id) return false;
   return queueWrite(async () => {
-    const deletedIds = await readTombstones();
-    if (!deletedIds.has(id)) return false;
-    deletedIds.delete(id);
-    await writeTombstones(deletedIds);
+    const { records } = await readTombstoneData();
+    if (!records.has(id)) return false;
+    records.delete(id);
+    await writeTombstoneRecords(records);
     console.log(`[Times] ID ${id} removido da lista de exclusoes permanentes por novo cadastro/salvamento explicito.`);
     return true;
   });
@@ -62,11 +101,38 @@ function installTeamDeletionGuard(storage) {
   const originalDeleteTeam = storage.deleteTeam.bind(storage);
 
   storage.readTeams = async function guardedReadTeams() {
-    const [teams, deletedIds] = await Promise.all([
+    const [teams, tombstoneData] = await Promise.all([
       originalReadTeams(),
-      readTombstones()
+      readTombstoneData()
     ]);
-    return (Array.isArray(teams) ? teams : []).filter((team) => !deletedIds.has(normalizeId(team?.id)));
+
+    const visibleTeams = [];
+    const revivedIds = [];
+
+    (Array.isArray(teams) ? teams : []).forEach((team) => {
+      const id = normalizeId(team?.id);
+      const record = tombstoneData.records.get(id);
+      if (!record) {
+        visibleTeams.push(team);
+        return;
+      }
+
+      if (teamIsNewerThanDeletion(team, record)) {
+        visibleTeams.push(team);
+        revivedIds.push(id);
+      }
+    });
+
+    if (revivedIds.length) {
+      await queueWrite(async () => {
+        const { records } = await readTombstoneData();
+        revivedIds.forEach((id) => records.delete(id));
+        await writeTombstoneRecords(records);
+      });
+      console.log(`[Times] ${revivedIds.length} time(s) criado(s) apos exclusao foram reativados na listagem.`);
+    }
+
+    return visibleTeams;
   };
 
   storage.saveTeam = async function guardedSaveTeam(team = {}) {
@@ -89,9 +155,9 @@ function installTeamDeletionGuard(storage) {
 
     const result = await originalDeleteTeam(teamId);
     await queueWrite(async () => {
-      const deletedIds = await readTombstones();
-      deletedIds.add(teamId);
-      await writeTombstones(deletedIds);
+      const { records } = await readTombstoneData();
+      records.set(teamId, { id: teamId, deletedAt: new Date().toISOString() });
+      await writeTombstoneRecords(records);
     });
 
     console.log(`[Times] Exclusao permanente registrada para ${teamId}.`);
