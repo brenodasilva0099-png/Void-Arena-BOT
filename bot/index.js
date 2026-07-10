@@ -7,6 +7,9 @@ const { installVoidArenaDirectMessageRoutes } = require('./patch-voidarena-direc
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { runDeployDatabaseGuard } = require('../server/deployDatabaseGuard');
+const { installTeamDeletionGuard } = require('../server/teamDeletionGuard');
+
+installTeamDeletionGuard(storage);
 
 const client = createDiscordClient();
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
