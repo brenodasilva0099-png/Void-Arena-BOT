@@ -45,10 +45,6 @@ async function backupHealthyDatabase(storage, status, options = {}) {
     return { success: true, skipped: true, reason: 'auto_export_disabled' };
   }
 
-  if (isEffectivelyEmpty(status)) {
-    return { success: true, skipped: true, reason: 'current_database_empty' };
-  }
-
   return githubBackups.saveBackupToGitHub(storage, {
     reason: bootBackupReason(options)
   });
@@ -66,31 +62,23 @@ async function runDeployDatabaseGuard(storage, options = {}) {
     status = await storage.readDatabaseStatus();
   } catch (error) {
     const fixed = await restoreBestBackup(storage);
-    return { success: true, restored: true, reason: 'database_inaccessible_restored_latest', error: error.message, restored: fixed };
+    return {
+      success: true,
+      restored: true,
+      reason: 'database_inaccessible_restored_latest',
+      error: error.message,
+      restoredData: fixed
+    };
   }
 
-  if (status?.error || isEffectivelyEmpty(status)) {
-    const fixed = await restoreBestBackup(storage);
-    return { success: true, restored: true, reason: 'database_empty_or_corrupted_restored_latest', status, restored: fixed };
-  }
-
-  let latest = null;
-  try {
-    latest = await githubBackups.fetchLatestBackupFromGitHub();
-  } catch {}
-
-  const currentWeight = totalDataWeight(status);
-  const latestWeight = totalDataWeight(latest?.summary || {});
-
-  if (latest && latestWeight > currentWeight && currentWeight <= 1) {
+  if (status?.error) {
     const fixed = await restoreBestBackup(storage);
     return {
       success: true,
       restored: true,
-      reason: 'latest_backup_has_more_data_than_current_boot_database',
-      currentSummary: status,
-      latestSummary: latest.summary || {},
-      restored: fixed
+      reason: 'database_corrupted_restored_latest',
+      status,
+      restoredData: fixed
     };
   }
 
@@ -105,11 +93,12 @@ async function runDeployDatabaseGuard(storage, options = {}) {
     success: true,
     restored: false,
     skipped: true,
-    reason: 'database_healthy',
+    reason: isEffectivelyEmpty(status)
+      ? 'database_readable_and_intentionally_empty_preserved'
+      : 'database_healthy',
     status,
-    latestSummary: latest?.summary || null,
     bootBackup: backup,
-    note: 'Banco saudável: dados atuais preservados e backup de boot tentado.'
+    note: 'Banco legivel preservado como fonte de verdade. Backup antigo nao substitui exclusoes validas.'
   };
 }
 
