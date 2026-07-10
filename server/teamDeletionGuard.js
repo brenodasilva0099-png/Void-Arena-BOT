@@ -40,6 +40,19 @@ function queueWrite(task) {
   return run;
 }
 
+async function forgetDeletedTeamId(teamId = '') {
+  const id = normalizeId(teamId);
+  if (!id) return false;
+  return queueWrite(async () => {
+    const deletedIds = await readTombstones();
+    if (!deletedIds.has(id)) return false;
+    deletedIds.delete(id);
+    await writeTombstones(deletedIds);
+    console.log(`[Times] ID ${id} removido da lista de exclusoes permanentes por novo cadastro/salvamento explicito.`);
+    return true;
+  });
+}
+
 function installTeamDeletionGuard(storage) {
   if (!storage || installed) return storage;
   installed = true;
@@ -60,22 +73,14 @@ function installTeamDeletionGuard(storage) {
     const id = normalizeId(team.id);
     if (!id) return originalSaveTeam(team);
 
-    const deletedIds = await readTombstones();
-    if (deletedIds.has(id) && team.recreateDeletedTeam !== true) {
-      const error = new Error('Este time foi excluido permanentemente e nao pode ser recriado por dados antigos.');
-      error.code = 'TEAM_PERMANENTLY_DELETED';
-      throw error;
-    }
+    // Salvamento vindo do site é uma ação explícita do usuário. Se o mesmo ID estiver
+    // marcado como excluído por causa de backup antigo/cache/recriação, removemos o
+    // bloqueio antes de salvar para o time recém-cadastrado aparecer normalmente.
+    await forgetDeletedTeamId(id);
 
-    if (team.recreateDeletedTeam === true) {
-      deletedIds.delete(id);
-      await queueWrite(() => writeTombstones(deletedIds));
-      const cleanTeam = { ...team };
-      delete cleanTeam.recreateDeletedTeam;
-      return originalSaveTeam(cleanTeam);
-    }
-
-    return originalSaveTeam(team);
+    const cleanTeam = { ...team };
+    delete cleanTeam.recreateDeletedTeam;
+    return originalSaveTeam(cleanTeam);
   };
 
   storage.deleteTeam = async function guardedDeleteTeam(id) {
@@ -100,5 +105,6 @@ function installTeamDeletionGuard(storage) {
 module.exports = {
   installTeamDeletionGuard,
   readTombstones,
+  forgetDeletedTeamId,
   TOMBSTONE_FILE
 };
