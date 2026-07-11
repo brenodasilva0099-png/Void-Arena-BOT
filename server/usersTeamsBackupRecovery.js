@@ -4,9 +4,11 @@ const zlib = require('node:zlib');
 const githubBackups = require('./githubBackups');
 
 const DEFAULT_RECOVERY_BACKUP_PATH = 'backups/2026-07/void-arena-backup-2026-07-10T21-13-15-122Z.json';
+const CLEAN_SNAPSHOT_PATH = 'backups/2026-07/void-arena-backup-2026-07-11T01-27-52-103Z.json';
 const DEFAULT_NAMED_RESTORE = ['x1', 'x!'];
 const DATA_DIR = process.env.DATA_DIR ? pathLib.resolve(process.env.DATA_DIR) : pathLib.join(__dirname, '..', 'data');
 const NAMED_RESTORE_MARKER = pathLib.join(DATA_DIR, 'named-user-restore-x1.done.json');
+const CLEAN_SNAPSHOT_MARKER = pathLib.join(DATA_DIR, 'clean-snapshot-2026-07-11-012752.done.json');
 
 function envTrue(name) {
   return String(process.env[name] || '').toLowerCase() === 'true';
@@ -26,72 +28,22 @@ function parseBackupDatabase(backup = {}) {
   return null;
 }
 
-function norm(value = '') {
-  return String(value || '').trim().toLowerCase();
-}
+function norm(value = '') { return String(value || '').trim().toLowerCase(); }
+function userLabels(user = {}) { return [user.name, user.discordTag, user.discordUsername, user.profile?.username, user.profile?.realName, user.discordId].map(norm).filter(Boolean); }
+function userMatchesNames(user = {}, names = []) { const wanted = new Set((Array.isArray(names) ? names : []).map(norm).filter(Boolean)); return wanted.size ? userLabels(user).some((label) => wanted.has(label)) : false; }
+function isHiddenUser(user = {}) { return Boolean(user.deletedAt || user.hiddenFromPlayersDirectory); }
+function byId(items = []) { return new Map((Array.isArray(items) ? items : []).map((item) => [String(item?.id || item?.discordId || '').trim(), item]).filter(([id]) => id)); }
+function byDiscord(items = []) { return new Map((Array.isArray(items) ? items : []).map((item) => [String(item?.discordId || '').trim(), item]).filter(([id]) => id)); }
 
-function userLabels(user = {}) {
-  return [user.name, user.discordTag, user.discordUsername, user.profile?.username, user.profile?.realName, user.discordId].map(norm).filter(Boolean);
-}
-
-function userMatchesNames(user = {}, names = []) {
-  const wanted = new Set((Array.isArray(names) ? names : []).map(norm).filter(Boolean));
-  if (!wanted.size) return false;
-  return userLabels(user).some((label) => wanted.has(label));
-}
-
-function isHiddenUser(user = {}) {
-  return Boolean(user.deletedAt || user.hiddenFromPlayersDirectory);
-}
-
-function byId(items = []) {
-  return new Map((Array.isArray(items) ? items : []).map((item) => [String(item?.id || item?.discordId || '').trim(), item]).filter(([id]) => id));
-}
-
-function byDiscord(items = []) {
-  return new Map((Array.isArray(items) ? items : []).map((item) => [String(item?.discordId || '').trim(), item]).filter(([id]) => id));
-}
-
-async function namedRestoreMarkerExists() {
-  try {
-    const raw = await fs.readFile(NAMED_RESTORE_MARKER, 'utf8');
-    const data = JSON.parse(raw || '{}');
-    return data?.completed === true ? data : null;
-  } catch {
-    return null;
-  }
-}
-
-async function markNamedRestoreDone(extra = {}) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const payload = { completed: true, completedAt: new Date().toISOString(), ...extra };
-  await fs.writeFile(NAMED_RESTORE_MARKER, JSON.stringify(payload, null, 2), 'utf8');
-  return payload;
-}
+async function readMarker(file) { try { const raw = await fs.readFile(file, 'utf8'); const data = JSON.parse(raw || '{}'); return data?.completed === true ? data : null; } catch { return null; } }
+async function writeMarker(file, extra = {}) { await fs.mkdir(DATA_DIR, { recursive: true }); const payload = { completed: true, completedAt: new Date().toISOString(), ...extra }; await fs.writeFile(file, JSON.stringify(payload, null, 2), 'utf8'); return payload; }
+async function namedRestoreMarkerExists() { return readMarker(NAMED_RESTORE_MARKER); }
+async function markNamedRestoreDone(extra = {}) { return writeMarker(NAMED_RESTORE_MARKER, extra); }
 
 function mergeUser(backupUser = {}, currentUser = null, options = {}) {
-  if (!currentUser) {
-    return {
-      ...backupUser,
-      ...(options.reactivate ? { deletedAt: null, hiddenFromPlayersDirectory: false, hiddenAt: null, restoredFromBackupAt: new Date().toISOString() } : {})
-    };
-  }
-  const merged = {
-    ...backupUser,
-    ...currentUser,
-    discordId: currentUser.discordId || backupUser.discordId || '',
-    provider: currentUser.provider || backupUser.provider || 'discord',
-    profile: { ...(backupUser.profile || {}), ...(currentUser.profile || {}) },
-    socials: { ...(backupUser.socials || {}), ...(currentUser.socials || {}) },
-    updatedAt: new Date().toISOString()
-  };
-  if (options.reactivate) {
-    merged.deletedAt = null;
-    merged.hiddenFromPlayersDirectory = false;
-    merged.hiddenAt = null;
-    merged.restoredFromBackupAt = new Date().toISOString();
-    merged.restoredFromBackupReason = options.reason || 'named-user-restore';
-  }
+  if (!currentUser) return { ...backupUser, ...(options.reactivate ? { deletedAt: null, hiddenFromPlayersDirectory: false, hiddenAt: null, restoredFromBackupAt: new Date().toISOString() } : {}) };
+  const merged = { ...backupUser, ...currentUser, discordId: currentUser.discordId || backupUser.discordId || '', provider: currentUser.provider || backupUser.provider || 'discord', profile: { ...(backupUser.profile || {}), ...(currentUser.profile || {}) }, socials: { ...(backupUser.socials || {}), ...(currentUser.socials || {}) }, updatedAt: new Date().toISOString() };
+  if (options.reactivate) { merged.deletedAt = null; merged.hiddenFromPlayersDirectory = false; merged.hiddenAt = null; merged.restoredFromBackupAt = new Date().toISOString(); merged.restoredFromBackupReason = options.reason || 'named-user-restore'; }
   return merged;
 }
 
@@ -101,6 +53,38 @@ async function loadBackupDatabase(path) {
   return { backup, database };
 }
 
+async function restoreCleanSnapshotIfNeeded(storage, status = {}) {
+  if (envTrue('CLEAN_SNAPSHOT_RESTORE_DISABLE')) return { success: true, skipped: true, reason: 'clean_snapshot_restore_disabled' };
+  const marker = await readMarker(CLEAN_SNAPSHOT_MARKER);
+  if (marker) return { success: true, skipped: true, reason: 'clean_snapshot_already_applied', marker };
+
+  const currentTeams = Number(status.teams || 0);
+  const currentUsers = Number(status.users || 0);
+  if (currentTeams <= 3) {
+    const marked = await writeMarker(CLEAN_SNAPSHOT_MARKER, { reason: 'database_already_at_or_below_clean_team_count', status });
+    return { success: true, skipped: true, reason: 'database_already_clean', marker: marked };
+  }
+
+  if (currentTeams < 10) return { success: true, skipped: true, reason: 'database_not_clearly_contaminated', status };
+
+  const backup = await githubBackups.fetchBackupFromGitHubPath(CLEAN_SNAPSHOT_PATH);
+  const summary = backup?.summary || {};
+  if (Number(summary.teams || 0) !== 3) {
+    return { success: false, skipped: true, reason: 'clean_snapshot_unexpected_team_count', summary, path: CLEAN_SNAPSHOT_PATH };
+  }
+
+  const imported = await storage.importDatabaseBackup(backup);
+  const markerData = await writeMarker(CLEAN_SNAPSHOT_MARKER, {
+    reason: 'restored_clean_snapshot_after_legacy_restore_contamination',
+    path: CLEAN_SNAPSHOT_PATH,
+    before: { users: currentUsers, teams: currentTeams },
+    backupSummary: summary,
+    importedSummary: imported.summary || null
+  });
+
+  return { success: true, restored: true, reason: 'clean_snapshot_restored', path: CLEAN_SNAPSHOT_PATH, before: status, imported, marker: markerData };
+}
+
 async function restoreNamedUsersFromBackup(storage, options = {}) {
   const enabled = envTrue('USERS_NAMED_RESTORE_FORCE') || Boolean(options.force);
   if (!enabled) return { success: true, skipped: true, reason: 'named_restore_disabled_by_default' };
@@ -108,76 +92,47 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
   const names = String(process.env.USERS_NAMED_RESTORE_NAMES || '').split(',').map((item) => item.trim()).filter(Boolean);
   const wantedNames = names.length ? names : DEFAULT_NAMED_RESTORE;
   const marker = await namedRestoreMarkerExists();
-  if (marker && !options.force && !envTrue('USERS_NAMED_RESTORE_REPEAT')) {
-    return { success: true, skipped: true, reason: 'named_restore_already_completed', marker, names: wantedNames };
-  }
+  if (marker && !options.force && !envTrue('USERS_NAMED_RESTORE_REPEAT')) return { success: true, skipped: true, reason: 'named_restore_already_completed', marker, names: wantedNames };
   const currentUsers = await storage.readUsers().catch(() => []);
   const currentById = byId(currentUsers);
   const currentByDiscord = byDiscord(currentUsers);
   const alreadyVisible = currentUsers.some((user) => userMatchesNames(user, wantedNames) && !isHiddenUser(user));
-  if (alreadyVisible && !envTrue('USERS_NAMED_RESTORE_REPEAT')) {
-    const markerData = await markNamedRestoreDone({ reason: 'named_user_already_visible', names: wantedNames, path });
-    return { success: true, skipped: true, reason: 'named_user_already_visible', marker: markerData, names: wantedNames };
-  }
+  if (alreadyVisible && !envTrue('USERS_NAMED_RESTORE_REPEAT')) { const markerData = await markNamedRestoreDone({ reason: 'named_user_already_visible', names: wantedNames, path }); return { success: true, skipped: true, reason: 'named_user_already_visible', marker: markerData, names: wantedNames }; }
   const { backup, database } = await loadBackupDatabase(path);
   const backupUsers = Array.isArray(database?.users) ? database.users : [];
   const candidates = backupUsers.filter((user) => userMatchesNames(user, wantedNames));
   if (!candidates.length) return { success: false, skipped: true, reason: 'named_user_not_found_in_backup', names: wantedNames, summary: backup.summary || {} };
   const restored = [];
-  for (const backupUser of candidates) {
-    const current = currentById.get(String(backupUser.id || backupUser.discordId || '').trim()) || currentByDiscord.get(String(backupUser.discordId || '').trim()) || null;
-    const restoredUser = mergeUser(backupUser, current, { reactivate: true, reason: 'manual-named-restore' });
-    await storage.saveUser(restoredUser);
-    restored.push({ id: restoredUser.id || '', discordId: restoredUser.discordId || '', name: restoredUser.name || restoredUser.profile?.username || '' });
-  }
+  for (const backupUser of candidates) { const current = currentById.get(String(backupUser.id || backupUser.discordId || '').trim()) || currentByDiscord.get(String(backupUser.discordId || '').trim()) || null; const restoredUser = mergeUser(backupUser, current, { reactivate: true, reason: 'manual-named-restore' }); await storage.saveUser(restoredUser); restored.push({ id: restoredUser.id || '', discordId: restoredUser.discordId || '', name: restoredUser.name || restoredUser.profile?.username || '' }); }
   const markerData = await markNamedRestoreDone({ reason: 'named_user_restored_from_backup', names: wantedNames, path, restored });
   return { success: true, restored: true, restoredUsers: restored.length, users: restored, path, names: wantedNames, marker: markerData };
 }
 
 async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
   const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
+  const cleanSnapshot = await restoreCleanSnapshotIfNeeded(storage, status).catch((error) => ({ success: false, skipped: true, reason: 'clean_snapshot_restore_failed', message: error.message }));
+  if (cleanSnapshot?.restored) return cleanSnapshot;
+
   const legacyEnabled = legacyRecoveryConfirmed() || Boolean(options.force && process.env.NODE_ENV === 'test');
-  if (!legacyEnabled) {
-    return {
-      success: true,
-      skipped: true,
-      reason: 'legacy_users_teams_recovery_disabled_current_database_is_source_of_truth',
-      status,
-      note: 'Backups antigos nao restauram automaticamente usuarios/times. O banco atual prevalece. Para restaurar backup antigo, defina USERS_TEAMS_LEGACY_RECOVERY=true e USERS_TEAMS_RECOVERY_CONFIRM=RESTORE_OLD_BACKUP.'
-    };
-  }
+  if (!legacyEnabled) return { success: true, skipped: true, reason: 'legacy_users_teams_recovery_disabled_current_database_is_source_of_truth', status, cleanSnapshot, note: 'Backups antigos nao restauram automaticamente usuarios/times. O banco atual prevalece. Para restaurar backup antigo, defina USERS_TEAMS_LEGACY_RECOVERY=true e USERS_TEAMS_RECOVERY_CONFIRM=RESTORE_OLD_BACKUP.' };
 
   const path = String(options.path || process.env.USERS_TEAMS_RECOVERY_BACKUP_PATH || DEFAULT_RECOVERY_BACKUP_PATH).trim();
   const currentUsersCount = Number(status.users || 0);
   const currentTeamsCount = Number(status.teams || 0);
-  if (!(currentUsersCount <= 1 && currentTeamsCount === 0) && !envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') && !options.force) {
-    return { success: true, skipped: true, reason: 'current_database_not_missing_users_teams_legacy_recovery_not_needed', status, path };
-  }
+  if (!(currentUsersCount <= 1 && currentTeamsCount === 0) && !envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') && !options.force) return { success: true, skipped: true, reason: 'current_database_not_missing_users_teams_legacy_recovery_not_needed', status, path };
 
   const { backup, database } = await loadBackupDatabase(path);
   const backupUsers = Array.isArray(database?.users) ? database.users : [];
   const backupTeams = Array.isArray(database?.teams) ? database.teams : [];
   if (!backupUsers.length && !backupTeams.length) return { success: false, skipped: true, reason: 'backup_without_users_or_teams', summary: backup.summary || {}, path };
-
   const currentUsers = await storage.readUsers().catch(() => []);
   const currentTeams = await storage.readTeams().catch(() => []);
   const currentUsersById = byId(currentUsers);
   const currentTeamIds = new Set((Array.isArray(currentTeams) ? currentTeams : []).map((team) => String(team?.id || '').trim()).filter(Boolean));
   let restoredUsers = 0;
   let restoredTeams = 0;
-  for (const user of backupUsers) {
-    const id = String(user?.id || user?.discordId || '').trim();
-    if (!id) continue;
-    await storage.saveUser(mergeUser(user, currentUsersById.get(id) || null));
-    restoredUsers += 1;
-  }
-  for (const team of backupTeams) {
-    const id = String(team?.id || '').trim();
-    if (!id) continue;
-    if (currentTeamIds.has(id) && !envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') && !options.force) continue;
-    await storage.saveTeam({ ...team, recoveredFromBackup: true, recoveredFromBackupAt: new Date().toISOString(), recoveredFromBackupPath: path, updatedAt: team.updatedAt || new Date().toISOString() });
-    restoredTeams += 1;
-  }
+  for (const user of backupUsers) { const id = String(user?.id || user?.discordId || '').trim(); if (!id) continue; await storage.saveUser(mergeUser(user, currentUsersById.get(id) || null)); restoredUsers += 1; }
+  for (const team of backupTeams) { const id = String(team?.id || '').trim(); if (!id) continue; if (currentTeamIds.has(id) && !envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') && !options.force) continue; await storage.saveTeam({ ...team, recoveredFromBackup: true, recoveredFromBackupAt: new Date().toISOString(), recoveredFromBackupPath: path, updatedAt: team.updatedAt || new Date().toISOString() }); restoredTeams += 1; }
   const nextStatus = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
   return { success: true, restored: true, path, backupSummary: backup.summary || {}, restoredUsers, restoredTeams, before: status, after: nextStatus };
 }
