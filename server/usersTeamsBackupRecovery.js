@@ -54,12 +54,15 @@ function teamMatchesTarget(team = {}) {
   return keys.some((key) => TARGET_TEAM_KEYS.has(key));
 }
 
-function hasDiscordLogin(user = {}) {
+function hasValidDiscordId(user = {}) {
   const discordId = String(user.discordId || user.discord?.id || '').trim();
-  if (!/^\d{16,22}$/.test(discordId)) return false;
-  if (user.deletedAt || user.hiddenFromPlayersDirectory) return false;
+  return /^\d{16,22}$/.test(discordId) && !user.deletedAt && !user.hiddenFromPlayersDirectory;
+}
+
+function hasDiscordLogin(user = {}) {
+  if (!hasValidDiscordId(user)) return false;
   const profile = user.profile || {};
-  const hasPublicProfile = Boolean(
+  return Boolean(
     user.avatar ||
     user.discordAvatar ||
     profile.avatar ||
@@ -70,7 +73,6 @@ function hasDiscordLogin(user = {}) {
     user.discordUsername ||
     user.discordTag
   );
-  return hasPublicProfile;
 }
 
 function collectTeamUserRefs(teams = []) {
@@ -127,14 +129,23 @@ function uniqueByIdentity(users = []) {
   return out;
 }
 
-function selectRealUsers(allUsers = [], targetTeams = []) {
-  const refs = collectTeamUserRefs(targetTeams);
-  const candidates = uniqueByIdentity((Array.isArray(allUsers) ? allUsers : [])
-    .filter(hasDiscordLogin)
+function sortUsersByRealness(users = [], refs = new Set()) {
+  return uniqueByIdentity(users)
+    .filter(hasValidDiscordId)
     .map((user) => ({ user, score: userScore(user, refs) }))
-    .filter((item) => item.score >= 55)
     .sort((a, b) => b.score - a.score || String(a.user.name || '').localeCompare(String(b.user.name || '')))
-    .map((item) => item.user));
+    .map((item) => item.user);
+}
+
+function selectRealUsers(allUsers = [], targetTeams = []) {
+  const source = Array.isArray(allUsers) ? allUsers : [];
+  const refs = collectTeamUserRefs(targetTeams);
+  let candidates = sortUsersByRealness(source.filter(hasDiscordLogin), refs).filter((user) => userScore(user, refs) >= 55);
+
+  if (candidates.length < TARGET_REAL_USER_COUNT) {
+    const fallback = sortUsersByRealness(source, refs);
+    candidates = uniqueByIdentity([...candidates, ...fallback]);
+  }
 
   return candidates.slice(0, TARGET_REAL_USER_COUNT).map((user) => ({
     ...user,
