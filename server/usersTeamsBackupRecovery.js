@@ -1,13 +1,9 @@
-const fs = require('node:fs/promises');
-const pathLib = require('node:path');
 const zlib = require('node:zlib');
 const githubBackups = require('./githubBackups');
 
 const CLEAN_SNAPSHOT_PATH = process.env.REAL_STATE_RECOVERY_BACKUP_PATH || 'backups/2026-07/void-arena-backup-2026-07-11T01-27-52-103Z.json';
 const TARGET_TEAM_KEYS = new Set(['hollownexus', 'ong', 'tecuieto', 'tequieto']);
 const TARGET_REAL_USER_COUNT = Math.max(1, Number(process.env.REAL_STATE_RECOVERY_USER_COUNT || 7) || 7);
-const DATA_DIR = process.env.DATA_DIR ? pathLib.resolve(process.env.DATA_DIR) : pathLib.join(__dirname, '..', 'data');
-const REAL_STATE_MARKER = pathLib.join(DATA_DIR, 'real-state-3teams-7discord-users.done.json');
 
 function envTrue(name) {
   return String(process.env[name] || '').toLowerCase() === 'true';
@@ -31,22 +27,6 @@ function parseBackupDatabase(backup = {}) {
   return null;
 }
 
-async function readMarker() {
-  try {
-    const data = JSON.parse(await fs.readFile(REAL_STATE_MARKER, 'utf8'));
-    return data?.completed === true ? data : null;
-  } catch {
-    return null;
-  }
-}
-
-async function writeMarker(extra = {}) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  const payload = { completed: true, completedAt: new Date().toISOString(), ...extra };
-  await fs.writeFile(REAL_STATE_MARKER, JSON.stringify(payload, null, 2), 'utf8');
-  return payload;
-}
-
 function teamMatchesTarget(team = {}) {
   const keys = [team.name, team.title, team.tag, team.slug, team.id]
     .map(normalizeKey)
@@ -57,22 +37,6 @@ function teamMatchesTarget(team = {}) {
 function hasValidDiscordId(user = {}) {
   const discordId = String(user.discordId || user.discord?.id || '').trim();
   return /^\d{16,22}$/.test(discordId) && !user.deletedAt && !user.hiddenFromPlayersDirectory;
-}
-
-function hasDiscordLogin(user = {}) {
-  if (!hasValidDiscordId(user)) return false;
-  const profile = user.profile || {};
-  return Boolean(
-    user.avatar ||
-    user.discordAvatar ||
-    profile.avatar ||
-    profile.banner ||
-    profile.discordBanner ||
-    profile.username ||
-    user.name ||
-    user.discordUsername ||
-    user.discordTag
-  );
 }
 
 function collectTeamUserRefs(teams = []) {
@@ -88,6 +52,7 @@ function collectTeamUserRefs(teams = []) {
     add(player.discordId);
     add(player.account);
   };
+
   teams.forEach((team) => {
     add(team.ownerUserId);
     add(team.ownerDiscordId);
@@ -100,6 +65,7 @@ function collectTeamUserRefs(teams = []) {
     (Array.isArray(team.playerAccounts?.players) ? team.playerAccounts.players : []).forEach(add);
     (Array.isArray(team.playerAccounts?.reserves) ? team.playerAccounts.reserves : []).forEach(add);
   });
+
   return refs;
 }
 
@@ -117,74 +83,77 @@ function userScore(user = {}, refs = new Set()) {
   return score;
 }
 
-function uniqueByIdentity(users = []) {
-  const seen = new Set();
-  const out = [];
-  users.forEach((user) => {
-    const key = String(user.discordId || user.id || '').trim();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    out.push(user);
-  });
-  return out;
+function userIdentity(user = {}) {
+  return String(user.discordId || user.id || '').trim();
 }
 
-function sortUsersByRealness(users = [], refs = new Set()) {
-  return uniqueByIdentity(users)
+function teamIdentity(team = {}) {
+  const id = String(team.id || '').trim();
+  if (id) return `id:${id}`;
+  const name = normalizeKey(team.name || team.title || '');
+  const tag = normalizeKey(team.tag || '');
+  return `name:${name}|tag:${tag}`;
+}
+
+function selectBaselineUsers(users = [], baselineTeams = []) {
+  const refs = collectTeamUserRefs(baselineTeams);
+  const seen = new Set();
+  return (Array.isArray(users) ? users : [])
     .filter(hasValidDiscordId)
     .map((user) => ({ user, score: userScore(user, refs) }))
-    .sort((a, b) => b.score - a.score || String(a.user.name || '').localeCompare(String(b.user.name || '')))
-    .map((item) => item.user);
+    .sort((a, b) => b.score - a.score)
+    .map((item) => item.user)
+    .filter((user) => {
+      const key = userIdentity(user);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, TARGET_REAL_USER_COUNT)
+    .map((user) => ({
+      ...user,
+      deletedAt: null,
+      hiddenFromPlayersDirectory: false,
+      hiddenAt: null
+    }));
 }
 
-function selectRealUsers(allUsers = [], targetTeams = []) {
-  const source = Array.isArray(allUsers) ? allUsers : [];
-  const refs = collectTeamUserRefs(targetTeams);
-  let candidates = sortUsersByRealness(source.filter(hasDiscordLogin), refs).filter((user) => userScore(user, refs) >= 55);
-
-  if (candidates.length < TARGET_REAL_USER_COUNT) {
-    const fallback = sortUsersByRealness(source, refs);
-    candidates = uniqueByIdentity([...candidates, ...fallback]);
-  }
-
-  return candidates.slice(0, TARGET_REAL_USER_COUNT).map((user) => ({
-    ...user,
-    deletedAt: null,
-    hiddenFromPlayersDirectory: false,
-    hiddenAt: null,
-    restoredFromCleanStateAt: new Date().toISOString()
-  }));
-}
-
-function cleanBracketForTeams(bracket = {}, teams = []) {
-  const ids = new Set(teams.map((team) => String(team.id || '').trim()).filter(Boolean));
-  const cleanSlots = (items) => (Array.isArray(items) ? items : []).map((slot) => {
-    const id = typeof slot === 'string' ? slot : slot?.id;
-    return id && ids.has(String(id)) ? id : null;
+function mergeUsers(currentUsers = [], baselineUsers = []) {
+  const map = new Map();
+  (Array.isArray(baselineUsers) ? baselineUsers : []).forEach((user) => {
+    const key = userIdentity(user);
+    if (key) map.set(key, { ...user });
   });
-  const cleanGroups = (groups) => (Array.isArray(groups) ? groups : []).map((group) => ({
-    ...group,
-    teams: (Array.isArray(group.teams) ? group.teams : []).filter((id) => ids.has(String(id))),
-    teamIds: (Array.isArray(group.teamIds) ? group.teamIds : []).filter((id) => ids.has(String(id)))
-  }));
-  return {
-    ...(bracket || {}),
-    slots: cleanSlots(bracket?.slots),
-    round16: cleanSlots(bracket?.round16),
-    quarters: cleanSlots(bracket?.quarters),
-    semis: cleanSlots(bracket?.semis),
-    finals: cleanSlots(bracket?.finals),
-    groups: cleanGroups(bracket?.groups),
-    updatedAt: new Date().toISOString()
-  };
+  (Array.isArray(currentUsers) ? currentUsers : []).forEach((user) => {
+    const key = userIdentity(user);
+    if (!key) return;
+    map.set(key, { ...(map.get(key) || {}), ...user });
+  });
+  return Array.from(map.values());
 }
 
-function currentAlreadyMatches(status = {}, teams = []) {
-  const currentTeams = Number(status.teams || 0);
-  const currentUsers = Number(status.users || 0);
-  if (currentTeams !== 3 || currentUsers < 7) return false;
-  const keys = new Set((Array.isArray(teams) ? teams : []).map((team) => normalizeKey(team.name || team.tag || team.id)));
-  return ['hollownexus', 'ong'].every((key) => keys.has(key)) && [...keys].some((key) => key.includes('tecuieto') || key.includes('tequieto'));
+function mergeTeams(currentTeams = [], baselineTeams = []) {
+  const map = new Map();
+  (Array.isArray(baselineTeams) ? baselineTeams : []).forEach((team) => {
+    const key = teamIdentity(team);
+    if (key) map.set(key, { ...team });
+  });
+  (Array.isArray(currentTeams) ? currentTeams : []).forEach((team) => {
+    const key = teamIdentity(team);
+    if (!key) return;
+    map.set(key, { ...(map.get(key) || {}), ...team });
+  });
+  return Array.from(map.values());
+}
+
+function containsBaselineTeams(currentTeams = [], baselineTeams = []) {
+  const currentIds = new Set(currentTeams.map(teamIdentity));
+  return baselineTeams.every((team) => currentIds.has(teamIdentity(team)));
+}
+
+function containsBaselineUsers(currentUsers = [], baselineUsers = []) {
+  const currentIds = new Set(currentUsers.map(userIdentity).filter(Boolean));
+  return baselineUsers.every((user) => currentIds.has(userIdentity(user)));
 }
 
 async function restoreRealStateIfNeeded(storage) {
@@ -192,73 +161,54 @@ async function restoreRealStateIfNeeded(storage) {
     return { success: true, skipped: true, reason: 'real_state_recovery_disabled' };
   }
 
-  const [status, currentTeams] = await Promise.all([
-    storage.readDatabaseStatus().catch((error) => ({ error: error.message })),
-    storage.readTeams().catch(() => [])
-  ]);
-
-  const marker = await readMarker();
-  if (marker && currentAlreadyMatches(status, currentTeams)) {
-    return { success: true, skipped: true, reason: 'real_state_already_restored_and_current_matches', marker, status };
-  }
-
-  if (currentAlreadyMatches(status, currentTeams)) {
-    const marked = await writeMarker({ reason: 'current_database_already_matches_real_state', status });
-    await githubBackups.saveBackupToGitHub(storage, { reason: 'real-state-already-current-backup' }).catch(() => null);
-    return { success: true, skipped: true, reason: 'current_database_already_matches_real_state', marker: marked, status };
-  }
-
-  const backup = await githubBackups.fetchBackupFromGitHubPath(CLEAN_SNAPSHOT_PATH);
-  const database = parseBackupDatabase(backup);
-  const backupTeams = Array.isArray(database?.teams) ? database.teams : [];
-  const backupUsers = Array.isArray(database?.users) ? database.users : [];
-  const targetTeams = backupTeams
-    .filter(teamMatchesTarget)
-    .map((team) => ({
-      ...team,
-      deletedAt: null,
-      restoredFromCleanStateAt: new Date().toISOString(),
-      restoredFromCleanStatePath: CLEAN_SNAPSHOT_PATH
-    }));
-
-  if (targetTeams.length !== 3) {
-    return {
-      success: false,
-      skipped: true,
-      reason: 'target_teams_not_found_in_clean_snapshot',
-      foundTeams: targetTeams.map((team) => team.name || team.tag || team.id),
-      backupSummary: backup.summary || {},
-      path: CLEAN_SNAPSHOT_PATH
-    };
-  }
-
-  const realUsers = selectRealUsers(backupUsers, targetTeams);
-  if (realUsers.length < Math.min(7, TARGET_REAL_USER_COUNT)) {
-    return {
-      success: false,
-      skipped: true,
-      reason: 'not_enough_real_discord_users_in_clean_snapshot',
-      restoredUsers: realUsers.length,
-      backupSummary: backup.summary || {},
-      path: CLEAN_SNAPSHOT_PATH
-    };
-  }
-
-  const currentBackup = await storage.exportDatabaseBackup().catch(() => null);
+  const currentBackup = await storage.exportDatabaseBackup();
   const currentDatabase = parseBackupDatabase(currentBackup) || {};
-  const baseDatabase = database && typeof database === 'object' ? database : {};
+  const currentUsers = Array.isArray(currentDatabase.users) ? currentDatabase.users : [];
+  const currentTeams = Array.isArray(currentDatabase.teams) ? currentDatabase.teams : [];
+
+  let cleanBackup;
+  try {
+    cleanBackup = await githubBackups.fetchBackupFromGitHubPath(CLEAN_SNAPSHOT_PATH);
+  } catch (error) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'clean_snapshot_unavailable_current_data_preserved',
+      message: error.message
+    };
+  }
+
+  const cleanDatabase = parseBackupDatabase(cleanBackup) || {};
+  const backupTeams = Array.isArray(cleanDatabase.teams) ? cleanDatabase.teams : [];
+  const backupUsers = Array.isArray(cleanDatabase.users) ? cleanDatabase.users : [];
+  const baselineTeams = backupTeams.filter(teamMatchesTarget);
+  const baselineUsers = selectBaselineUsers(backupUsers, baselineTeams);
+
+  if (!baselineTeams.length && !baselineUsers.length) {
+    return { success: true, skipped: true, reason: 'clean_snapshot_has_no_recoverable_users_or_teams' };
+  }
+
+  if (containsBaselineTeams(currentTeams, baselineTeams) && containsBaselineUsers(currentUsers, baselineUsers)) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'real_users_and_teams_already_present',
+      currentUsers: currentUsers.length,
+      currentTeams: currentTeams.length
+    };
+  }
+
+  const mergedUsers = mergeUsers(currentUsers, baselineUsers);
+  const mergedTeams = mergeTeams(currentTeams, baselineTeams);
   const nextDatabase = {
-    ...baseDatabase,
     ...currentDatabase,
-    users: realUsers,
-    teams: targetTeams,
-    bracket: cleanBracketForTeams(currentDatabase.bracket || baseDatabase.bracket || {}, targetTeams),
+    users: mergedUsers,
+    teams: mergedTeams,
     meta: {
-      ...(baseDatabase.meta || {}),
       ...(currentDatabase.meta || {}),
-      realStateRecoveredAt: new Date().toISOString(),
-      realStateRecoveryPath: CLEAN_SNAPSHOT_PATH,
-      realStatePolicy: 'current-state-forward-only-no-automatic-old-backup-restore'
+      usersTeamsRecoveredAt: new Date().toISOString(),
+      usersTeamsRecoveryPath: CLEAN_SNAPSHOT_PATH,
+      usersTeamsRecoveryPolicy: 'merge-missing-baseline-never-replace-current'
     }
   };
 
@@ -270,28 +220,19 @@ async function restoreRealStateIfNeeded(storage) {
   });
 
   const savedBackup = await githubBackups.saveBackupToGitHub(storage, {
-    reason: 'real-state-restored-3-teams-7-discord-users'
+    reason: 'users-teams-merged-after-recovery'
   }).catch((error) => ({ success: false, message: error.message }));
-
-  const markerData = await writeMarker({
-    reason: 'restored_real_state_from_clean_snapshot',
-    path: CLEAN_SNAPSHOT_PATH,
-    before: status,
-    teams: targetTeams.map((team) => team.name || team.tag || team.id),
-    users: realUsers.map((user) => ({ id: user.id || '', discordId: user.discordId || '', name: user.profile?.username || user.name || user.discordUsername || '' })),
-    importedSummary: imported.summary || null,
-    backupAfterRestore: savedBackup?.backupPath || savedBackup?.savedAt || savedBackup
-  });
 
   return {
     success: true,
     restored: true,
-    reason: 'real_state_restored_3_teams_7_discord_users',
-    path: CLEAN_SNAPSHOT_PATH,
-    before: status,
+    reason: 'missing_real_users_and_teams_merged_without_removing_current_data',
+    beforeUsers: currentUsers.length,
+    beforeTeams: currentTeams.length,
+    afterUsers: mergedUsers.length,
+    afterTeams: mergedTeams.length,
     imported,
-    marker: markerData,
-    backupAfterRestore: savedBackup
+    backupAfterMerge: savedBackup
   };
 }
 
@@ -303,7 +244,7 @@ async function recoverUsersAndTeamsFromBackup(storage) {
   const realState = await restoreRealStateIfNeeded(storage).catch((error) => ({
     success: false,
     skipped: true,
-    reason: 'real_state_recovery_failed',
+    reason: 'real_state_recovery_failed_current_data_preserved',
     message: error.message
   }));
 
@@ -313,7 +254,7 @@ async function recoverUsersAndTeamsFromBackup(storage) {
     skipped: !realState.restored,
     reason: realState.reason || 'real_state_checked',
     realState,
-    note: 'Backups antigos nao restauram automaticamente. O fluxo agora e: estado real atual + novos cadastros daqui para frente.'
+    note: 'Usuarios e times reais ausentes sao apenas mesclados. Cadastros atuais e futuros nunca sao substituidos pela recuperacao.'
   };
 }
 
