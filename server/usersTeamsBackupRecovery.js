@@ -2,6 +2,7 @@ const zlib = require('node:zlib');
 const githubBackups = require('./githubBackups');
 
 const DEFAULT_RECOVERY_BACKUP_PATH = 'backups/2026-07/void-arena-backup-2026-07-10T21-13-15-122Z.json';
+const DEFAULT_NAMED_RESTORE = ['x1', 'x!'];
 
 function parseBackupDatabase(backup = {}) {
   if (backup?.type === 'void-arena-database-backup' && backup?.format === 'gzip-base64-json' && backup.database) {
@@ -14,17 +15,61 @@ function parseBackupDatabase(backup = {}) {
   return null;
 }
 
+function norm(value = '') {
+  return String(value || '').trim().toLowerCase();
+}
+
+function userLabels(user = {}) {
+  return [
+    user.name,
+    user.discordTag,
+    user.discordUsername,
+    user.profile?.username,
+    user.profile?.realName,
+    user.discordId
+  ].map(norm).filter(Boolean);
+}
+
+function userMatchesNames(user = {}, names = []) {
+  const wanted = new Set((Array.isArray(names) ? names : []).map(norm).filter(Boolean));
+  if (!wanted.size) return false;
+  return userLabels(user).some((label) => wanted.has(label));
+}
+
+function isHiddenUser(user = {}) {
+  return Boolean(user.deletedAt || user.hiddenFromPlayersDirectory);
+}
+
 function byId(items = []) {
   return new Map((Array.isArray(items) ? items : [])
     .map((item) => [String(item?.id || item?.discordId || '').trim(), item])
     .filter(([id]) => id));
 }
 
-function mergeUser(backupUser = {}, currentUser = null) {
-  if (!currentUser) return backupUser;
-  return {
+function byDiscord(items = []) {
+  return new Map((Array.isArray(items) ? items : [])
+    .map((item) => [String(item?.discordId || '').trim(), item])
+    .filter(([id]) => id));
+}
+
+function mergeUser(backupUser = {}, currentUser = null, options = {}) {
+  if (!currentUser) {
+    return {
+      ...backupUser,
+      ...(options.reactivate ? {
+        deletedAt: null,
+        hiddenFromPlayersDirectory: false,
+        hiddenAt: null,
+        restoredFromBackupAt: new Date().toISOString()
+      } : {})
+    };
+  }
+
+  const merged = {
     ...backupUser,
     ...currentUser,
+    discordId: currentUser.discordId || backupUser.discordId || '',
+    provider: currentUser.provider || backupUser.provider || 'discord',
     profile: {
       ...(backupUser.profile || {}),
       ...(currentUser.profile || {})
@@ -33,8 +78,63 @@ function mergeUser(backupUser = {}, currentUser = null) {
       ...(backupUser.socials || {}),
       ...(currentUser.socials || {})
     },
-    updatedAt: currentUser.updatedAt || backupUser.updatedAt || new Date().toISOString()
+    updatedAt: new Date().toISOString()
   };
+
+  if (options.reactivate) {
+    merged.deletedAt = null;
+    merged.hiddenFromPlayersDirectory = false;
+    merged.hiddenAt = null;
+    merged.restoredFromBackupAt = new Date().toISOString();
+    merged.restoredFromBackupReason = options.reason || 'named-user-restore';
+  }
+
+  return merged;
+}
+
+async function loadBackupDatabase(path) {
+  const backup = await githubBackups.fetchBackupFromGitHubPath(path);
+  const database = parseBackupDatabase(backup);
+  return { backup, database };
+}
+
+async function restoreNamedUsersFromBackup(storage, options = {}) {
+  const enabled = String(process.env.USERS_NAMED_RESTORE || 'true').toLowerCase() !== 'false';
+  if (!enabled) return { success: true, skipped: true, reason: 'named_restore_disabled' };
+
+  const path = String(options.path || process.env.USERS_TEAMS_RECOVERY_BACKUP_PATH || DEFAULT_RECOVERY_BACKUP_PATH).trim();
+  const names = String(process.env.USERS_NAMED_RESTORE_NAMES || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const wantedNames = names.length ? names : DEFAULT_NAMED_RESTORE;
+
+  const currentUsers = await storage.readUsers().catch(() => []);
+  const currentById = byId(currentUsers);
+  const currentByDiscord = byDiscord(currentUsers);
+  const alreadyVisible = currentUsers.some((user) => userMatchesNames(user, wantedNames) && !isHiddenUser(user));
+
+  if (alreadyVisible && !options.force) {
+    return { success: true, skipped: true, reason: 'named_user_already_visible', names: wantedNames };
+  }
+
+  const { backup, database } = await loadBackupDatabase(path);
+  const backupUsers = Array.isArray(database?.users) ? database.users : [];
+  const candidates = backupUsers.filter((user) => userMatchesNames(user, wantedNames));
+
+  if (!candidates.length) {
+    return { success: false, skipped: true, reason: 'named_user_not_found_in_backup', names: wantedNames, summary: backup.summary || {} };
+  }
+
+  const restored = [];
+  for (const backupUser of candidates) {
+    const current = currentById.get(String(backupUser.id || backupUser.discordId || '').trim()) || currentByDiscord.get(String(backupUser.discordId || '').trim()) || null;
+    const restoredUser = mergeUser(backupUser, current, { reactivate: true, reason: 'restore-x1-discord-login' });
+    await storage.saveUser(restoredUser);
+    restored.push({ id: restoredUser.id || '', discordId: restoredUser.discordId || '', name: restoredUser.name || restoredUser.profile?.username || '' });
+  }
+
+  return { success: true, restored: true, restoredUsers: restored.length, users: restored, path, names: wantedNames };
 }
 
 async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
@@ -54,17 +154,18 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
   const currentTeamsCount = Number(status.teams || 0);
 
   if (!force && !(currentUsersCount <= 1 && currentTeamsCount === 0)) {
+    const namedRestore = await restoreNamedUsersFromBackup(storage, { path }).catch((error) => ({ success: false, skipped: true, reason: 'named_restore_failed', message: error.message }));
     return {
       success: true,
       skipped: true,
       reason: 'current_database_not_missing_users_teams',
       status,
-      path
+      path,
+      namedRestore
     };
   }
 
-  const backup = await githubBackups.fetchBackupFromGitHubPath(path);
-  const database = parseBackupDatabase(backup);
+  const { backup, database } = await loadBackupDatabase(path);
   const backupUsers = Array.isArray(database?.users) ? database.users : [];
   const backupTeams = Array.isArray(database?.teams) ? database.teams : [];
 
@@ -107,6 +208,7 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
     restoredTeams += 1;
   }
 
+  const namedRestore = await restoreNamedUsersFromBackup(storage, { path, force: true }).catch((error) => ({ success: false, skipped: true, reason: 'named_restore_failed', message: error.message }));
   const nextStatus = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
 
   return {
@@ -116,6 +218,7 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
     backupSummary: backup.summary || {},
     restoredUsers,
     restoredTeams,
+    namedRestore,
     before: status,
     after: nextStatus
   };
@@ -123,6 +226,7 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
 
 module.exports = {
   recoverUsersAndTeamsFromBackup,
+  restoreNamedUsersFromBackup,
   parseBackupDatabase,
   DEFAULT_RECOVERY_BACKUP_PATH
 };
