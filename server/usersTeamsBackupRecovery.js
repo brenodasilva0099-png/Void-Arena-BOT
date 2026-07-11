@@ -8,6 +8,10 @@ const DEFAULT_NAMED_RESTORE = ['x1', 'x!'];
 const DATA_DIR = process.env.DATA_DIR ? pathLib.resolve(process.env.DATA_DIR) : pathLib.join(__dirname, '..', 'data');
 const NAMED_RESTORE_MARKER = pathLib.join(DATA_DIR, 'named-user-restore-x1.done.json');
 
+function envTrue(name) {
+  return String(process.env[name] || '').toLowerCase() === 'true';
+}
+
 function parseBackupDatabase(backup = {}) {
   if (backup?.type === 'void-arena-database-backup' && backup?.format === 'gzip-base64-json' && backup.database) {
     const buffer = Buffer.from(String(backup.database || ''), 'base64');
@@ -124,8 +128,8 @@ async function loadBackupDatabase(path) {
 }
 
 async function restoreNamedUsersFromBackup(storage, options = {}) {
-  const enabled = String(process.env.USERS_NAMED_RESTORE || 'true').toLowerCase() !== 'false';
-  if (!enabled) return { success: true, skipped: true, reason: 'named_restore_disabled' };
+  const enabled = envTrue('USERS_NAMED_RESTORE_FORCE') || Boolean(options.force);
+  if (!enabled) return { success: true, skipped: true, reason: 'named_restore_disabled_by_default' };
 
   const path = String(options.path || process.env.USERS_TEAMS_RECOVERY_BACKUP_PATH || DEFAULT_RECOVERY_BACKUP_PATH).trim();
   const names = String(process.env.USERS_NAMED_RESTORE_NAMES || '')
@@ -133,10 +137,9 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
     .map((item) => item.trim())
     .filter(Boolean);
   const wantedNames = names.length ? names : DEFAULT_NAMED_RESTORE;
-  const force = Boolean(options.force) || String(process.env.USERS_NAMED_RESTORE_FORCE || '').toLowerCase() === 'true';
   const marker = await namedRestoreMarkerExists();
 
-  if (marker && !force) {
+  if (marker && !options.force && !envTrue('USERS_NAMED_RESTORE_REPEAT')) {
     return { success: true, skipped: true, reason: 'named_restore_already_completed', marker, names: wantedNames };
   }
 
@@ -145,7 +148,7 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
   const currentByDiscord = byDiscord(currentUsers);
   const alreadyVisible = currentUsers.some((user) => userMatchesNames(user, wantedNames) && !isHiddenUser(user));
 
-  if (alreadyVisible && !force) {
+  if (alreadyVisible && !envTrue('USERS_NAMED_RESTORE_REPEAT')) {
     const markerData = await markNamedRestoreDone({ reason: 'named_user_already_visible', names: wantedNames, path });
     return { success: true, skipped: true, reason: 'named_user_already_visible', marker: markerData, names: wantedNames };
   }
@@ -161,7 +164,7 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
   const restored = [];
   for (const backupUser of candidates) {
     const current = currentById.get(String(backupUser.id || backupUser.discordId || '').trim()) || currentByDiscord.get(String(backupUser.discordId || '').trim()) || null;
-    const restoredUser = mergeUser(backupUser, current, { reactivate: true, reason: 'restore-x1-discord-login' });
+    const restoredUser = mergeUser(backupUser, current, { reactivate: true, reason: 'manual-named-restore' });
     await storage.saveUser(restoredUser);
     restored.push({ id: restoredUser.id || '', discordId: restoredUser.discordId || '', name: restoredUser.name || restoredUser.profile?.username || '' });
   }
@@ -171,8 +174,18 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
 }
 
 async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
-  const enabled = String(process.env.USERS_TEAMS_BACKUP_RECOVERY || 'true').toLowerCase() !== 'false';
-  if (!enabled) return { success: true, skipped: true, reason: 'users_teams_recovery_disabled' };
+  const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
+  const legacyEnabled = envTrue('USERS_TEAMS_LEGACY_RECOVERY') || envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') || Boolean(options.force);
+
+  if (!legacyEnabled) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'legacy_users_teams_recovery_disabled_current_database_is_source_of_truth',
+      status,
+      note: 'Backups antigos nao restauram automaticamente usuarios/times. O banco atual prevalece.'
+    };
+  }
 
   const path = String(
     options.path ||
@@ -180,21 +193,16 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
     DEFAULT_RECOVERY_BACKUP_PATH
   ).trim();
 
-  const force = Boolean(options.force) || String(process.env.USERS_TEAMS_BACKUP_RECOVERY_FORCE || '').toLowerCase() === 'true';
-  const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
-
   const currentUsersCount = Number(status.users || 0);
   const currentTeamsCount = Number(status.teams || 0);
 
-  if (!force && !(currentUsersCount <= 1 && currentTeamsCount === 0)) {
-    const namedRestore = await restoreNamedUsersFromBackup(storage, { path }).catch((error) => ({ success: false, skipped: true, reason: 'named_restore_failed', message: error.message }));
+  if (!(currentUsersCount <= 1 && currentTeamsCount === 0) && !envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') && !options.force) {
     return {
       success: true,
       skipped: true,
-      reason: 'current_database_not_missing_users_teams',
+      reason: 'current_database_not_missing_users_teams_legacy_recovery_not_needed',
       status,
-      path,
-      namedRestore
+      path
     };
   }
 
@@ -230,7 +238,7 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
   for (const team of backupTeams) {
     const id = String(team?.id || '').trim();
     if (!id) continue;
-    if (currentTeamIds.has(id) && !force) continue;
+    if (currentTeamIds.has(id) && !envTrue('USERS_TEAMS_BACKUP_RECOVERY_FORCE') && !options.force) continue;
     await storage.saveTeam({
       ...team,
       recoveredFromBackup: true,
@@ -241,7 +249,6 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
     restoredTeams += 1;
   }
 
-  const namedRestore = await restoreNamedUsersFromBackup(storage, { path, force: true }).catch((error) => ({ success: false, skipped: true, reason: 'named_restore_failed', message: error.message }));
   const nextStatus = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
 
   return {
@@ -251,7 +258,6 @@ async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
     backupSummary: backup.summary || {},
     restoredUsers,
     restoredTeams,
-    namedRestore,
     before: status,
     after: nextStatus
   };
