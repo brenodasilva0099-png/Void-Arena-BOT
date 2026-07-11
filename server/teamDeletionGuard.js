@@ -28,10 +28,7 @@ async function readTombstoneData() {
     (Array.isArray(items) ? items : []).forEach((item) => {
       const id = normalizeId(typeof item === 'string' ? item : item?.id || item?.teamId);
       if (!id) return;
-      records.set(id, {
-        id,
-        deletedAt: typeof item === 'object' && item?.deletedAt ? item.deletedAt : fallbackDeletedAt
-      });
+      records.set(id, { id, deletedAt: typeof item === 'object' && item?.deletedAt ? item.deletedAt : fallbackDeletedAt });
     });
 
     return { records, updatedAt: fallbackDeletedAt };
@@ -49,9 +46,7 @@ async function writeTombstoneRecords(records) {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const now = new Date().toISOString();
   const payload = {
-    deletedTeamIds: Array.from(records.values())
-      .map((record) => ({ id: record.id, deletedAt: record.deletedAt || now }))
-      .sort((a, b) => a.id.localeCompare(b.id)),
+    deletedTeamIds: Array.from(records.values()).map((record) => ({ id: record.id, deletedAt: record.deletedAt || now })).sort((a, b) => a.id.localeCompare(b.id)),
     updatedAt: now
   };
   const temp = `${TOMBSTONE_FILE}.tmp`;
@@ -71,12 +66,18 @@ function queueWrite(task) {
   return run;
 }
 
-function teamIsNewerThanDeletion(team = {}, record = {}) {
+function teamTime(team = {}) {
+  return Math.max(timeMs(team.createdAt), timeMs(team.updatedAt));
+}
+
+function shouldBlockRestoredTeam(team = {}, record = {}) {
   const deletedAt = timeMs(record.deletedAt);
-  if (!deletedAt) return false;
-  const createdAt = timeMs(team.createdAt);
-  const updatedAt = timeMs(team.updatedAt);
-  return Math.max(createdAt, updatedAt) > deletedAt;
+  const savedAt = teamTime(team);
+
+  // Se o time não tem datas confiáveis, não escondemos na listagem normal.
+  // O bloqueio pesado fica para import/restore de backup, onde sabemos que é restauração.
+  if (!deletedAt || !savedAt) return false;
+  return savedAt <= deletedAt;
 }
 
 async function forgetDeletedTeamId(teamId = '') {
@@ -87,9 +88,29 @@ async function forgetDeletedTeamId(teamId = '') {
     if (!records.has(id)) return false;
     records.delete(id);
     await writeTombstoneRecords(records);
-    console.log(`[Times] ID ${id} removido da lista de exclusoes permanentes por novo cadastro/salvamento explicito.`);
+    console.log(`[Times] ID ${id} removido da lista de exclusoes por salvamento/cadastro atual.`);
     return true;
   });
+}
+
+async function removeTombstonedTeamsFromImportedStorage(originalReadTeams, originalDeleteTeam) {
+  const [teams, tombstoneData] = await Promise.all([originalReadTeams(), readTombstoneData()]);
+  const removed = [];
+
+  for (const team of Array.isArray(teams) ? teams : []) {
+    const id = normalizeId(team?.id);
+    const record = tombstoneData.records.get(id);
+    if (!record) continue;
+    if (!shouldBlockRestoredTeam(team, record)) continue;
+    await originalDeleteTeam(id).catch(() => false);
+    removed.push(id);
+  }
+
+  if (removed.length) {
+    console.log(`[Times] ${removed.length} time(s) antigos removidos apos import/restore de backup: ${removed.join(', ')}`);
+  }
+
+  return removed;
 }
 
 function installTeamDeletionGuard(storage) {
@@ -99,15 +120,12 @@ function installTeamDeletionGuard(storage) {
   const originalReadTeams = storage.readTeams.bind(storage);
   const originalSaveTeam = storage.saveTeam.bind(storage);
   const originalDeleteTeam = storage.deleteTeam.bind(storage);
+  const originalImportDatabaseBackup = typeof storage.importDatabaseBackup === 'function' ? storage.importDatabaseBackup.bind(storage) : null;
 
   storage.readTeams = async function guardedReadTeams() {
-    const [teams, tombstoneData] = await Promise.all([
-      originalReadTeams(),
-      readTombstoneData()
-    ]);
-
+    const [teams, tombstoneData] = await Promise.all([originalReadTeams(), readTombstoneData()]);
     const visibleTeams = [];
-    const revivedIds = [];
+    const staleTombstones = [];
 
     (Array.isArray(teams) ? teams : []).forEach((team) => {
       const id = normalizeId(team?.id);
@@ -117,19 +135,21 @@ function installTeamDeletionGuard(storage) {
         return;
       }
 
-      if (teamIsNewerThanDeletion(team, record)) {
+      // Se o banco atual ainda tem o time e ele é mais novo que a exclusão,
+      // ele é cadastro legítimo e o tombstone estava velho.
+      if (!shouldBlockRestoredTeam(team, record)) {
         visibleTeams.push(team);
-        revivedIds.push(id);
+        staleTombstones.push(id);
       }
     });
 
-    if (revivedIds.length) {
+    if (staleTombstones.length) {
       await queueWrite(async () => {
         const { records } = await readTombstoneData();
-        revivedIds.forEach((id) => records.delete(id));
+        staleTombstones.forEach((id) => records.delete(id));
         await writeTombstoneRecords(records);
       });
-      console.log(`[Times] ${revivedIds.length} time(s) criado(s) apos exclusao foram reativados na listagem.`);
+      console.log(`[Times] ${staleTombstones.length} tombstone(s) antigo(s) ignorado(s) porque o banco atual possui cadastro valido.`);
     }
 
     return visibleTeams;
@@ -137,13 +157,7 @@ function installTeamDeletionGuard(storage) {
 
   storage.saveTeam = async function guardedSaveTeam(team = {}) {
     const id = normalizeId(team.id);
-    if (!id) return originalSaveTeam(team);
-
-    // Salvamento vindo do site é uma ação explícita do usuário. Se o mesmo ID estiver
-    // marcado como excluído por causa de backup antigo/cache/recriação, removemos o
-    // bloqueio antes de salvar para o time recém-cadastrado aparecer normalmente.
-    await forgetDeletedTeamId(id);
-
+    if (id) await forgetDeletedTeamId(id);
     const cleanTeam = { ...team };
     delete cleanTeam.recreateDeletedTeam;
     return originalSaveTeam(cleanTeam);
@@ -152,25 +166,26 @@ function installTeamDeletionGuard(storage) {
   storage.deleteTeam = async function guardedDeleteTeam(id) {
     const teamId = normalizeId(id);
     if (!teamId) return false;
-
     const result = await originalDeleteTeam(teamId);
     await queueWrite(async () => {
       const { records } = await readTombstoneData();
       records.set(teamId, { id: teamId, deletedAt: new Date().toISOString() });
       await writeTombstoneRecords(records);
     });
-
-    console.log(`[Times] Exclusao permanente registrada para ${teamId}.`);
+    console.log(`[Times] Exclusao registrada para ${teamId}.`);
     return result;
   };
+
+  if (originalImportDatabaseBackup) {
+    storage.importDatabaseBackup = async function guardedImportDatabaseBackup(payload = {}) {
+      const result = await originalImportDatabaseBackup(payload);
+      const removed = await removeTombstonedTeamsFromImportedStorage(originalReadTeams, originalDeleteTeam);
+      return { ...result, removedTombstonedTeams: removed };
+    };
+  }
 
   console.log(`[Times] Protecao contra restauracao de times excluidos ativa em ${TOMBSTONE_FILE}.`);
   return storage;
 }
 
-module.exports = {
-  installTeamDeletionGuard,
-  readTombstones,
-  forgetDeletedTeamId,
-  TOMBSTONE_FILE
-};
+module.exports = { installTeamDeletionGuard, readTombstones, forgetDeletedTeamId, TOMBSTONE_FILE };
