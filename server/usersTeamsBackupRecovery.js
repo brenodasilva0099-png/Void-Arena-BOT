@@ -1,8 +1,12 @@
+const fs = require('node:fs/promises');
+const pathLib = require('node:path');
 const zlib = require('node:zlib');
 const githubBackups = require('./githubBackups');
 
 const DEFAULT_RECOVERY_BACKUP_PATH = 'backups/2026-07/void-arena-backup-2026-07-10T21-13-15-122Z.json';
 const DEFAULT_NAMED_RESTORE = ['x1', 'x!'];
+const DATA_DIR = process.env.DATA_DIR ? pathLib.resolve(process.env.DATA_DIR) : pathLib.join(__dirname, '..', 'data');
+const NAMED_RESTORE_MARKER = pathLib.join(DATA_DIR, 'named-user-restore-x1.done.json');
 
 function parseBackupDatabase(backup = {}) {
   if (backup?.type === 'void-arena-database-backup' && backup?.format === 'gzip-base64-json' && backup.database) {
@@ -50,6 +54,27 @@ function byDiscord(items = []) {
   return new Map((Array.isArray(items) ? items : [])
     .map((item) => [String(item?.discordId || '').trim(), item])
     .filter(([id]) => id));
+}
+
+async function namedRestoreMarkerExists() {
+  try {
+    const raw = await fs.readFile(NAMED_RESTORE_MARKER, 'utf8');
+    const data = JSON.parse(raw || '{}');
+    return data?.completed === true ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+async function markNamedRestoreDone(extra = {}) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const payload = {
+    completed: true,
+    completedAt: new Date().toISOString(),
+    ...extra
+  };
+  await fs.writeFile(NAMED_RESTORE_MARKER, JSON.stringify(payload, null, 2), 'utf8');
+  return payload;
 }
 
 function mergeUser(backupUser = {}, currentUser = null, options = {}) {
@@ -108,14 +133,21 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
     .map((item) => item.trim())
     .filter(Boolean);
   const wantedNames = names.length ? names : DEFAULT_NAMED_RESTORE;
+  const force = Boolean(options.force) || String(process.env.USERS_NAMED_RESTORE_FORCE || '').toLowerCase() === 'true';
+  const marker = await namedRestoreMarkerExists();
+
+  if (marker && !force) {
+    return { success: true, skipped: true, reason: 'named_restore_already_completed', marker, names: wantedNames };
+  }
 
   const currentUsers = await storage.readUsers().catch(() => []);
   const currentById = byId(currentUsers);
   const currentByDiscord = byDiscord(currentUsers);
   const alreadyVisible = currentUsers.some((user) => userMatchesNames(user, wantedNames) && !isHiddenUser(user));
 
-  if (alreadyVisible && !options.force) {
-    return { success: true, skipped: true, reason: 'named_user_already_visible', names: wantedNames };
+  if (alreadyVisible && !force) {
+    const markerData = await markNamedRestoreDone({ reason: 'named_user_already_visible', names: wantedNames, path });
+    return { success: true, skipped: true, reason: 'named_user_already_visible', marker: markerData, names: wantedNames };
   }
 
   const { backup, database } = await loadBackupDatabase(path);
@@ -134,7 +166,8 @@ async function restoreNamedUsersFromBackup(storage, options = {}) {
     restored.push({ id: restoredUser.id || '', discordId: restoredUser.discordId || '', name: restoredUser.name || restoredUser.profile?.username || '' });
   }
 
-  return { success: true, restored: true, restoredUsers: restored.length, users: restored, path, names: wantedNames };
+  const markerData = await markNamedRestoreDone({ reason: 'named_user_restored_from_backup', names: wantedNames, path, restored });
+  return { success: true, restored: true, restoredUsers: restored.length, users: restored, path, names: wantedNames, marker: markerData };
 }
 
 async function recoverUsersAndTeamsFromBackup(storage, options = {}) {
