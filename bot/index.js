@@ -4,12 +4,14 @@ const { createDiscordClient, startDiscordBot } = require('./discordClient');
 const { startInternalApi } = require('./internalApi');
 const { startEventDmSync } = require('./eventDmSync');
 const { installVoidArenaDirectMessageRoutes } = require('./patch-voidarena-direct-messages');
+const { installAutoMutationBackup } = require('./autoMutationBackup');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { runDeployDatabaseGuard } = require('../server/deployDatabaseGuard');
 const { installTeamDeletionGuard } = require('../server/teamDeletionGuard');
 
 installTeamDeletionGuard(storage);
+installAutoMutationBackup(storage, githubBackups);
 
 const client = createDiscordClient();
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
@@ -29,11 +31,8 @@ function startScheduledBackups() {
   async function run(reason = 'scheduled-auto-backup') {
     try {
       const manifest = await githubBackups.saveBackupToGitHub(storage, { reason });
-      if (manifest?.skipped) {
-        console.log(`Backup automatico pulado: ${manifest.reason || manifest.message || 'sem motivo'}`);
-      } else {
-        console.log(`Backup automatico salvo: ${manifest.backupPath || manifest.savedAt || 'ok'}`);
-      }
+      if (manifest?.skipped) console.log(`Backup automatico pulado: ${manifest.reason || manifest.message || 'sem motivo'}`);
+      else console.log(`Backup automatico salvo: ${manifest.backupPath || manifest.savedAt || 'ok'}`);
     } catch (error) {
       console.error('Backup automatico falhou:', error.message);
     }
@@ -42,7 +41,6 @@ function startScheduledBackups() {
   setTimeout(() => run('post-boot-auto-backup'), 90 * 1000).unref?.();
   const timer = setInterval(() => run('scheduled-auto-backup'), intervalMs);
   timer.unref?.();
-
   console.log(`Backups automaticos agendados a cada ${minutes} min.`);
   return timer;
 }
@@ -63,10 +61,5 @@ async function boot() {
 
 boot();
 
-process.on('unhandledRejection', (error) => {
-  console.error('Erro nao tratado no bot:', error);
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('Excecao nao tratada:', error);
-});
+process.on('unhandledRejection', (error) => console.error('Erro nao tratado no bot:', error));
+process.on('uncaughtException', (error) => console.error('Excecao nao tratada:', error));
