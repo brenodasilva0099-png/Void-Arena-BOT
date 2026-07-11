@@ -9,6 +9,7 @@ const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { runDeployDatabaseGuard } = require('../server/deployDatabaseGuard');
 const { installTeamDeletionGuard } = require('../server/teamDeletionGuard');
+const { recoverUsersAndTeamsFromBackup } = require('../server/usersTeamsBackupRecovery');
 
 installTeamDeletionGuard(storage);
 installAutoMutationBackup(storage, githubBackups);
@@ -51,6 +52,14 @@ async function boot() {
     console.log('Deploy Guard do banco:', guard?.reason || 'ok');
   } catch (error) {
     console.error('Deploy Guard do banco falhou:', error.message);
+  }
+
+  try {
+    const recovery = await recoverUsersAndTeamsFromBackup(storage);
+    if (recovery?.restored) console.log(`Recuperacao users/teams: ${recovery.restoredUsers} usuario(s), ${recovery.restoredTeams} time(s).`);
+    else console.log(`Recuperacao users/teams pulada: ${recovery?.reason || 'sem motivo'}.`);
+  } catch (error) {
+    console.error('Recuperacao users/teams falhou:', error.message);
   }
 
   startInternalApi({ client, port: INTERNAL_API_PORT });
