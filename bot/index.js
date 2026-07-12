@@ -24,7 +24,18 @@ const REGISTERED_RESTORE_MARKER = path.join(DATA_DIR, 'registered-data-restore-m
 
 installVoidArenaDirectMessageRoutes({ client, storage });
 
+let internalApiServer = null;
+let scheduledBackupTimer = null;
+let startupMaintenanceStarted = false;
+
+function ensureInternalApiStarted() {
+  if (internalApiServer) return internalApiServer;
+  internalApiServer = startInternalApi({ client, port: INTERNAL_API_PORT });
+  return internalApiServer;
+}
+
 function startScheduledBackups() {
+  if (scheduledBackupTimer) return scheduledBackupTimer;
   const enabled = String(process.env.GITHUB_BACKUP_SCHEDULED || 'true').toLowerCase() !== 'false';
   if (!enabled) {
     console.log('Backups automaticos agendados: desativados.');
@@ -45,10 +56,10 @@ function startScheduledBackups() {
   }
 
   setTimeout(() => run('post-boot-auto-backup'), 90 * 1000).unref?.();
-  const timer = setInterval(() => run('scheduled-auto-backup'), intervalMs);
-  timer.unref?.();
+  scheduledBackupTimer = setInterval(() => run('scheduled-auto-backup'), intervalMs);
+  scheduledBackupTimer.unref?.();
   console.log(`Backups automaticos agendados a cada ${minutes} min.`);
-  return timer;
+  return scheduledBackupTimer;
 }
 
 async function readRegisteredRestoreMarker() {
@@ -122,7 +133,10 @@ async function gracefulShutdown(signal) {
 process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.once('SIGINT', () => gracefulShutdown('SIGINT'));
 
-async function boot() {
+async function runStartupMaintenance() {
+  if (startupMaintenanceStarted) return;
+  startupMaintenanceStarted = true;
+
   try {
     const guard = await runDeployDatabaseGuard(storage);
     console.log('Deploy Guard do banco:', guard?.reason || 'ok');
@@ -135,11 +149,21 @@ async function boot() {
   } catch (error) {
     console.error('Recuperacao de dados registrados falhou:', error.message);
   }
+}
 
-  startInternalApi({ client, port: INTERNAL_API_PORT });
-  startDiscordBot(client);
+async function boot() {
+  ensureInternalApiStarted();
+
+  startDiscordBot(client).catch((error) => {
+    console.error('Falha ao iniciar bot Discord:', error.message);
+  });
+
   startScheduledBackups();
   startEventDmSync(client, storage);
+
+  setTimeout(() => {
+    runStartupMaintenance().catch((error) => console.error('Manutencao inicial falhou:', error.message));
+  }, 0).unref?.();
 }
 
 boot();
