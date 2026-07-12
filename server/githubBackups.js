@@ -58,23 +58,65 @@ async function putGithubFile(config, filePath, content, message) {
 function monthFolder(date = new Date()) { return date.toISOString().slice(0, 7); }
 function backupFileName(prefix, date = new Date()) { return `${prefix}-backup-${date.toISOString().replace(/[:.]/g, '-')}.json`; }
 
-function looksDangerouslyEmpty(backup = {}, latest = null) {
-  const nextTeams = Number(backup.summary?.teams || 0);
-  const nextUsers = Number(backup.summary?.users || 0);
-  const nextMessages = Number(backup.summary?.messages || 0);
-  const latestTeams = Number(latest?.summary?.teams || 0);
-  const latestUsers = Number(latest?.summary?.users || 0);
-  const latestMessages = Number(latest?.summary?.messages || 0);
+const REGRESSION_KEYS = [
+  'users',
+  'teams',
+  'events',
+  'playerApplications',
+  'trainingSubmissions',
+  'eventRegistrationRequests',
+  'teamChats'
+];
 
-  // Deletar todos os times pode ser uma ação intencional. Então NÃO bloqueia só porque teams caiu.
-  // Só bloqueia quando o banco atual parece realmente zerado/incompleto em tudo.
-  return nextTeams === 0 && nextUsers === 0 && nextMessages === 0 && (latestTeams > 0 || latestUsers > 0 || latestMessages > 0);
+function summaryValue(summary = {}, key = '') {
+  return Number(summary?.[key] || 0) || 0;
+}
+
+function summaryWeight(summary = {}) {
+  return REGRESSION_KEYS.reduce((sum, key) => sum + summaryValue(summary, key), 0);
+}
+
+function reasonAllowsRegression(reason = '') {
+  const safe = String(reason || '').toLowerCase();
+  return (
+    safe.startsWith('mutation:') ||
+    safe.includes('manual') ||
+    safe.includes('delete') ||
+    safe.includes('exclu') ||
+    safe.includes('support-ticket-updated-current-state') ||
+    safe.includes('player-application-deleted-current-state')
+  );
+}
+
+function regressionDetails(nextSummary = {}, latestSummary = {}) {
+  return REGRESSION_KEYS
+    .map((key) => ({ key, next: summaryValue(nextSummary, key), latest: summaryValue(latestSummary, key) }))
+    .filter((item) => item.latest > item.next);
+}
+
+function looksDangerouslyEmpty(backup = {}, latest = null) {
+  const nextSummary = backup.summary || {};
+  const latestSummary = latest?.summary || {};
+  return summaryWeight(nextSummary) === 0 && summaryWeight(latestSummary) > 0;
+}
+
+function looksLikeDataRegression(backup = {}, latest = null, reason = '') {
+  if (!latest || reasonAllowsRegression(reason)) return false;
+  const details = regressionDetails(backup.summary || {}, latest.summary || {});
+  if (!details.length) return false;
+
+  // Boot, post-boot e backup agendado não podem transformar um banco menor em latest.
+  // Reduções intencionais devem passar por mutação real: deleteTeam, saveUser, formulários etc.
+  const safeReason = String(reason || '').toLowerCase();
+  const protectedReason = !safeReason || safeReason.includes('boot') || safeReason.includes('scheduled') || safeReason.includes('healthy') || safeReason.includes('restore') || safeReason.includes('merge');
+  return protectedReason;
 }
 
 async function saveBackupToGitHub(storage, options = {}) {
   const config = requireConfig();
   const backup = await storage.exportDatabaseBackup();
   const now = new Date();
+  const reason = options.reason || 'manual';
 
   if (!options.force) {
     const latest = await fetchLatestBackupFromGitHub().catch(() => null);
@@ -86,6 +128,19 @@ async function saveBackupToGitHub(storage, options = {}) {
         message: 'Backup atual parece zerado de verdade. Latest preservado para evitar perda total.',
         attemptedSummary: backup.summary || {},
         latestSummary: latest?.summary || {},
+        savedAt: now.toISOString()
+      };
+    }
+
+    if (latest && looksLikeDataRegression(backup, latest, reason)) {
+      return {
+        success: true,
+        skipped: true,
+        reason: 'regressive_backup_blocked',
+        message: 'Backup de boot/agendado tinha menos dados que o latest. Latest preservado.',
+        attemptedSummary: backup.summary || {},
+        latestSummary: latest?.summary || {},
+        regression: regressionDetails(backup.summary || {}, latest.summary || {}),
         savedAt: now.toISOString()
       };
     }
@@ -104,7 +159,7 @@ async function saveBackupToGitHub(storage, options = {}) {
     repo: config.repo,
     branch: config.branch,
     summary: backup.summary || {},
-    reason: options.reason || 'manual'
+    reason
   };
 
   const backupContent = JSON.stringify({ ...backup, githubBackup: { savedAt: manifest.savedAt, path: backupPath, reason: manifest.reason } }, null, 2);
@@ -125,11 +180,11 @@ async function fetchLatestBackupFromGitHub() {
 async function restoreLatestBackupFromGitHub(storage) {
   const backup = await fetchLatestBackupFromGitHub();
   const result = await storage.importDatabaseBackup(backup);
-  return { success: true, restoredFromGithub: true, backupExportedAt: backup.exportedAt || null, result };
+  return { success: true, restoredFromGithub: true, backupExportedAt: backup.exportedAt || null, summary: backup.summary || null, result };
 }
 
 function isEffectivelyEmpty(status = {}) {
-  return Number(status.users || 0) === 0 && Number(status.teams || 0) === 0 && Number(status.messages || 0) === 0 && Number(status.teamChats || 0) === 0 && Number(status.bracketSlots || 0) === 0;
+  return REGRESSION_KEYS.reduce((sum, key) => sum + Number(status?.[key] || 0), 0) === 0 && Number(status.messages || 0) === 0 && Number(status.bracketSlots || 0) === 0;
 }
 
 async function autoRestoreLatestBackup(storage) {
@@ -206,4 +261,4 @@ async function restoreBackupFromGitHubPath(storage, filePath) {
   return { success: true, restoredFromGithub: true, path: filePath, backupExportedAt: backup.exportedAt || null, result };
 }
 
-module.exports = { restoreBackupFromGitHubPath, fetchBackupFromGitHubPath, listBackupsFromGitHub, getConfig, saveBackupToGitHub, fetchLatestBackupFromGitHub, restoreLatestBackupFromGitHub, autoRestoreLatestBackup };
+module.exports = { restoreBackupFromGitHubPath, fetchBackupFromGitHubPath, listBackupsFromGitHub, getConfig, saveBackupToGitHub, fetchLatestBackupFromGitHub, restoreLatestBackupFromGitHub, autoRestoreLatestBackup, regressionDetails, summaryWeight };
