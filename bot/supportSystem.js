@@ -2,6 +2,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   EmbedBuilder,
   Events,
   ModalBuilder,
@@ -12,6 +13,9 @@ const {
 const zlib = require('node:zlib');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
+
+const SUPPORT_CHANNEL_NAME = process.env.SUPPORT_CHANNEL_NAME || '🛟・suporte-void-arena';
+const SUPPORT_CATEGORY_ID = String(process.env.SUPPORT_CATEGORY_ID || process.env.VOID_ARENA_CATEGORY_ID || '1523133579570184194').trim();
 
 function canManage(member) {
   return Boolean(
@@ -152,19 +156,50 @@ function supportPanelEmbed() {
     .setFooter({ text: 'Void Arena • Central de Suporte' });
 }
 
-async function sendSupportPanel(message) {
-  await message.reply({
-    embeds: [supportPanelEmbed()],
-    components: [
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId('voidsupport:open')
-          .setLabel('Abrir suporte')
-          .setEmoji('🛟')
-          .setStyle(ButtonStyle.Primary)
-      )
-    ]
+function panelComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('voidsupport:open')
+        .setLabel('Abrir suporte')
+        .setEmoji('🛟')
+        .setStyle(ButtonStyle.Primary)
+    )
+  ];
+}
+
+async function sendSupportPanel(messageOrChannel) {
+  const payload = { embeds: [supportPanelEmbed()], components: panelComponents() };
+  if (typeof messageOrChannel.reply === 'function') return messageOrChannel.reply(payload);
+  return messageOrChannel.send(payload);
+}
+
+function normalizeChannelName(name = '') {
+  return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+async function findOrCreateSupportChannel(message) {
+  const guild = message.guild;
+  if (!guild) throw new Error('Servidor inválido.');
+  const targetKey = normalizeChannelName(SUPPORT_CHANNEL_NAME);
+  const existing = guild.channels.cache.find((channel) => channel.type === ChannelType.GuildText && normalizeChannelName(channel.name) === targetKey);
+  if (existing) return existing;
+
+  const parent = SUPPORT_CATEGORY_ID ? guild.channels.cache.get(SUPPORT_CATEGORY_ID) : null;
+  const channel = await guild.channels.create({
+    name: SUPPORT_CHANNEL_NAME,
+    type: ChannelType.GuildText,
+    parent: parent?.type === ChannelType.GuildCategory ? parent.id : undefined,
+    topic: '🛟 Central de suporte Void Arena para problemas no site, bot, times, jogadores e formulários.',
+    reason: 'Central de suporte Void Arena criada pelo bot.'
   });
+  return channel;
+}
+
+async function createSupportChannelAndPanel(message) {
+  const channel = await findOrCreateSupportChannel(message);
+  await sendSupportPanel(channel);
+  await message.reply(`✅ Canal de suporte pronto: <#${channel.id}>`);
 }
 
 function supportModal() {
@@ -273,12 +308,26 @@ function registerSupportSystem(client) {
   client.on(Events.MessageCreate, async (message) => {
     if (!message.guild || message.author.bot) return;
     const content = message.content.trim().toLowerCase();
+
     if (content === '.suporte-painel') {
       if (!canManage(message.member)) {
         await message.reply('❌ Apenas staff/admin pode criar o painel de suporte.');
         return;
       }
       await sendSupportPanel(message);
+      return;
+    }
+
+    if (content === '.suporte-chat') {
+      if (!canManage(message.member)) {
+        await message.reply('❌ Apenas staff/admin pode criar o chat de suporte.');
+        return;
+      }
+      if (!message.guild.members.me?.permissions?.has?.(PermissionFlagsBits.ManageChannels)) {
+        await message.reply('❌ Preciso da permissão **Gerenciar canais** para criar o chat de suporte.');
+        return;
+      }
+      await createSupportChannelAndPanel(message);
     }
   });
 
