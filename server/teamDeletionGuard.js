@@ -10,6 +10,7 @@ let writeQueue = Promise.resolve();
 
 function normalizeId(value = '') { return String(value || '').trim(); }
 function timeMs(value = '') { const ms = new Date(value || '').getTime(); return Number.isFinite(ms) ? ms : 0; }
+function truthy(value) { return String(value || '').toLowerCase() === 'true'; }
 
 async function readTombstoneData() {
   try {
@@ -48,6 +49,16 @@ function shouldBlockRestoredTeam(team = {}, record = {}) {
   if (!deletedAt || !savedAt) return false;
   return savedAt <= deletedAt;
 }
+function importAllowsRegisteredRestore(payload = {}) {
+  const meta = payload?.meta || payload?.database?.meta || {};
+  return Boolean(
+    payload.allowRegisteredDataRestore ||
+    payload.allowRegisteredTeamRestore ||
+    meta.allowRegisteredDataRestore ||
+    meta.restoreRegisteredPlayersAndTeams ||
+    truthy(process.env.ALLOW_REGISTERED_TEAM_RESTORE_ON_IMPORT)
+  );
+}
 async function forgetDeletedTeamId(teamId = '') {
   const id = normalizeId(teamId);
   if (!id) return false;
@@ -81,7 +92,6 @@ function installTeamDeletionGuard(storage) {
   const originalDeleteTeam = storage.deleteTeam.bind(storage);
   const originalImportDatabaseBackup = typeof storage.importDatabaseBackup === 'function' ? storage.importDatabaseBackup.bind(storage) : null;
 
-  // Leitura normal deve refletir o banco atual. A limpeza de times antigos acontece no restore/import.
   storage.readTeams = async function guardedReadTeams() {
     return originalReadTeams();
   };
@@ -110,6 +120,10 @@ function installTeamDeletionGuard(storage) {
   if (originalImportDatabaseBackup) {
     storage.importDatabaseBackup = async function guardedImportDatabaseBackup(payload = {}) {
       const result = await originalImportDatabaseBackup(payload);
+      if (importAllowsRegisteredRestore(payload)) {
+        console.log('[Times] Importacao controlada de dados registrados: tombstones ignoradas nesta restauracao.');
+        return { ...result, tombstoneCleanupSkipped: true, tombstoneCleanupReason: 'controlled_registered_data_restore' };
+      }
       const removed = await removeTombstonedTeamsFromImportedStorage(originalReadTeams, originalDeleteTeam);
       return { ...result, removedTombstonedTeams: removed };
     };
