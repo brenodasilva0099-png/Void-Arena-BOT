@@ -1,5 +1,7 @@
 require('dotenv').config();
 
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { createDiscordClient, startDiscordBot } = require('./discordClient');
 const { startInternalApi } = require('./internalApi');
 const { startEventDmSync } = require('./eventDmSync');
@@ -16,6 +18,9 @@ installAutoMutationBackup(storage, githubBackups);
 
 const client = createDiscordClient();
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
+const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
+const REGISTERED_RESTORE_VERSION = process.env.REGISTERED_DATA_RESTORE_VERSION || 'registered-data-restore-2026-07-12-v2';
+const REGISTERED_RESTORE_MARKER = path.join(DATA_DIR, 'registered-data-restore-marker.json');
 
 installVoidArenaDirectMessageRoutes({ client, storage });
 
@@ -46,18 +51,51 @@ function startScheduledBackups() {
   return timer;
 }
 
-async function maybeRunHistoricalRecovery() {
-  const enabled = String(process.env.REAL_STATE_RECOVERY_ENABLE || '').toLowerCase() === 'true';
-  const confirm = String(process.env.REAL_STATE_RECOVERY_CONFIRM || '').trim();
+async function readRegisteredRestoreMarker() {
+  try {
+    const raw = await fs.readFile(REGISTERED_RESTORE_MARKER, 'utf8');
+    return JSON.parse(raw || '{}');
+  } catch {
+    return null;
+  }
+}
 
-  if (!enabled || confirm !== 'MERGE_BACKUP_HISTORY') {
-    console.log('Recuperacao historica pulada: fluxo normal preserva apenas banco atual + latest vivo.');
-    return { success: true, skipped: true, reason: 'historical_recovery_disabled' };
+async function writeRegisteredRestoreMarker(recovery = {}) {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  const payload = {
+    version: REGISTERED_RESTORE_VERSION,
+    ranAt: new Date().toISOString(),
+    restored: Boolean(recovery?.restored),
+    reason: recovery?.reason || recovery?.realState?.reason || 'registered_data_restore_checked',
+    summary: recovery?.realState?.after || recovery?.realState?.current || null
+  };
+  await fs.writeFile(REGISTERED_RESTORE_MARKER, JSON.stringify(payload, null, 2), 'utf8');
+  return payload;
+}
+
+async function maybeRunRegisteredDataRestore() {
+  if (String(process.env.REAL_STATE_RECOVERY_DISABLE || '').toLowerCase() === 'true') {
+    return { success: true, skipped: true, reason: 'registered_restore_disabled' };
+  }
+
+  const manual = String(process.env.REAL_STATE_RECOVERY_ENABLE || '').toLowerCase() === 'true' && String(process.env.REAL_STATE_RECOVERY_CONFIRM || '').trim() === 'MERGE_BACKUP_HISTORY';
+  const marker = await readRegisteredRestoreMarker();
+  const shouldRun = manual || !marker || marker.version !== REGISTERED_RESTORE_VERSION;
+
+  if (!shouldRun) {
+    console.log(`Recuperacao de dados registrados pulada: ja executada (${marker.version}).`);
+    return { success: true, skipped: true, reason: 'registered_restore_already_ran', marker };
   }
 
   const recovery = await recoverUsersAndTeamsFromBackup(storage);
-  if (recovery?.restored) console.log(`Recuperacao historica: dados adicionados ao banco atual.`);
-  else console.log(`Recuperacao historica pulada: ${recovery?.reason || 'sem motivo'}.`);
+  if (recovery?.restored) {
+    const state = recovery.realState || {};
+    console.log(`Recuperacao de dados registrados: +${state.addedUsers || 0} jogador(es), +${state.addedTeams || 0} time(s), modificados ${state.modifiedUsers || 0}/${state.modifiedTeams || 0}.`);
+  } else {
+    console.log(`Recuperacao de dados registrados pulada: ${recovery?.reason || 'sem motivo'}.`);
+  }
+
+  await writeRegisteredRestoreMarker(recovery);
   return recovery;
 }
 
@@ -88,9 +126,9 @@ async function boot() {
   }
 
   try {
-    await maybeRunHistoricalRecovery();
+    await maybeRunRegisteredDataRestore();
   } catch (error) {
-    console.error('Recuperacao historica falhou:', error.message);
+    console.error('Recuperacao de dados registrados falhou:', error.message);
   }
 
   startInternalApi({ client, port: INTERNAL_API_PORT });
