@@ -4,7 +4,7 @@ const githubBackups = require('./githubBackups');
 const CLEAN_SNAPSHOT_PATH = process.env.REAL_STATE_RECOVERY_BACKUP_PATH || 'backups/2026-07/void-arena-backup-2026-07-11T01-27-52-103Z.json';
 const OWNER_DISCORD_ID = String(process.env.OWNER_DISCORD_ID || '1235713276277559326').trim();
 const REQUIRED_TEAM_KEYS = new Set(['yung', 'thecreator']);
-const HISTORY_SCAN_LIMIT = Math.max(10, Math.min(100, Number(process.env.REAL_TEAM_RECOVERY_BACKUP_SCAN_LIMIT || 40) || 40));
+const HISTORY_SCAN_LIMIT = Math.max(10, Math.min(150, Number(process.env.REAL_TEAM_RECOVERY_BACKUP_SCAN_LIMIT || 80) || 80));
 
 function envTrue(name) {
   return String(process.env[name] || '').toLowerCase() === 'true';
@@ -28,6 +28,15 @@ function parseBackupDatabase(backup = {}) {
   return null;
 }
 
+function itemTime(item = {}) {
+  return Math.max(
+    new Date(item.updatedAt || 0).getTime() || 0,
+    new Date(item.createdAt || 0).getTime() || 0,
+    new Date(item.submittedAt || 0).getTime() || 0,
+    new Date(item.reviewedAt || 0).getTime() || 0
+  );
+}
+
 function userIdentity(user = {}) {
   return String(user.discordId || user.id || '').trim();
 }
@@ -36,6 +45,15 @@ function teamIdentity(team = {}) {
   const id = String(team.id || '').trim();
   if (id) return `id:${id}`;
   return `name:${normalizeKey(team.name || team.title || '')}|tag:${normalizeKey(team.tag || '')}`;
+}
+
+function recordIdentity(item = {}, fallbackPrefix = 'record') {
+  const id = String(item.id || item.messageId || item.discordMessageId || '').trim();
+  if (id) return `id:${id}`;
+  const user = String(item.userId || item.discordId || item.playerDiscordId || item.responsibleDiscordId || '').trim();
+  const created = String(item.createdAt || item.submittedAt || item.updatedAt || '').trim();
+  const name = normalizeKey(item.userName || item.playerName || item.responsibleName || item.teamName || item.title || item.name || '');
+  return `${fallbackPrefix}:${user}:${created}:${name}`;
 }
 
 function teamNameKey(team = {}) {
@@ -66,8 +84,13 @@ function isOwnerCreatedTeam(team = {}) {
 }
 
 function shouldRecoverTeam(team = {}) {
+  if (!team || typeof team !== 'object') return false;
+  if (team.deletedAt || team.removedAt || team.hidden) return false;
   const key = teamNameKey(team);
   if (REQUIRED_TEAM_KEYS.has(key)) return true;
+  if (envTrue('REAL_DATA_RECOVER_ALL_TEAMS')) return true;
+  // Mantém o comportamento seguro anterior: recupera YUNG/The Creator e times reais criados por outros usuários.
+  // Se quiser puxar literalmente todos os times do histórico, basta definir REAL_DATA_RECOVER_ALL_TEAMS=true.
   return !isOwnerCreatedTeam(team);
 }
 
@@ -76,50 +99,88 @@ function hasValidDiscordId(user = {}) {
   return /^\d{16,22}$/.test(discordId) && !user.deletedAt && !user.hiddenFromPlayersDirectory;
 }
 
-function mergeUsers(currentUsers = [], recoveredUsers = []) {
+function hasRealProfileSignal(user = {}) {
+  const profile = user.profile || {};
+  return Boolean(
+    user.avatar ||
+    user.discordAvatar ||
+    profile.avatar ||
+    profile.banner ||
+    profile.discordBanner ||
+    profile.username ||
+    user.name ||
+    user.discordUsername ||
+    user.discordTag ||
+    user.provider === 'discord' ||
+    user.authProvider === 'discord'
+  );
+}
+
+function shouldRecoverUser(user = {}) {
+  if (!hasValidDiscordId(user)) return false;
+  if (envTrue('REAL_DATA_RECOVER_DISCORD_ID_ONLY')) return true;
+  return hasRealProfileSignal(user);
+}
+
+function mergeByIdentity(currentItems = [], recoveredItems = [], identityFn, options = {}) {
   const map = new Map();
-  [...(Array.isArray(recoveredUsers) ? recoveredUsers : []), ...(Array.isArray(currentUsers) ? currentUsers : [])].forEach((user) => {
-    const key = userIdentity(user);
+  const put = (item, source) => {
+    if (!item || typeof item !== 'object') return;
+    const key = identityFn(item);
     if (!key) return;
-    map.set(key, { ...(map.get(key) || {}), ...user });
-  });
+    const previous = map.get(key);
+    if (!previous) {
+      map.set(key, { ...item });
+      return;
+    }
+    const previousTime = itemTime(previous);
+    const nextTime = itemTime(item);
+    const preferCurrent = source === 'current';
+    const shouldReplace = preferCurrent || nextTime >= previousTime || options.keepLatest === false;
+    map.set(key, shouldReplace ? { ...previous, ...item } : previous);
+  };
+  (Array.isArray(recoveredItems) ? recoveredItems : []).forEach((item) => put(item, 'recovered'));
+  (Array.isArray(currentItems) ? currentItems : []).forEach((item) => put(item, 'current'));
   return Array.from(map.values());
 }
 
-function mergeTeams(currentTeams = [], recoveredTeams = []) {
-  const map = new Map();
-  (Array.isArray(recoveredTeams) ? recoveredTeams : []).forEach((team) => {
-    const key = teamIdentity(team);
-    if (key) map.set(key, { ...team });
-  });
-  (Array.isArray(currentTeams) ? currentTeams : []).forEach((team) => {
-    const key = teamIdentity(team);
-    if (!key) return;
-    map.set(key, { ...(map.get(key) || {}), ...team });
-  });
-  return Array.from(map.values());
+function normalizeDeletedApplicationIds(database = {}) {
+  const settings = database.settings && typeof database.settings === 'object' ? database.settings : {};
+  const values = [
+    ...(Array.isArray(database.deletedPlayerApplicationIds) ? database.deletedPlayerApplicationIds : []),
+    ...(Array.isArray(settings.deletedPlayerApplicationIds) ? settings.deletedPlayerApplicationIds : []),
+    ...(Array.isArray(settings.forms?.deletedPlayerApplicationIds) ? settings.forms.deletedPlayerApplicationIds : [])
+  ];
+  return new Set(values.map((item) => String(typeof item === 'string' ? item : item?.id || item?.applicationId || '').trim()).filter(Boolean));
 }
 
-function collectReferencedUsers(allUsers = [], teams = []) {
-  const refs = new Set();
-  (Array.isArray(teams) ? teams : []).forEach((team) => {
-    [team.ownerUserId, team.directorUserId, team.captainUserId].forEach((value) => {
-      const safe = String(value || '').trim();
-      if (safe) refs.add(safe);
-    });
-    teamDiscordIds(team).forEach((id) => refs.add(id));
-    [...(team.playerDetails || []), ...(team.reserveDetails || [])].forEach((player) => {
-      [player?.id, player?.userId, player?.discordId].forEach((value) => {
-        const safe = String(value || '').trim();
-        if (safe) refs.add(safe);
-      });
-    });
+function filterDeletedApplications(applications = [], deletedIds = new Set()) {
+  return (Array.isArray(applications) ? applications : []).filter((item) => !deletedIds.has(String(item?.id || '').trim()));
+}
+
+function collectRecoveryArrays(history = [], currentDatabase = {}) {
+  const recovered = {
+    users: [],
+    teams: [],
+    events: [],
+    playerApplications: [],
+    trainingSubmissions: [],
+    eventRegistrationRequests: []
+  };
+
+  history.forEach(({ database }) => {
+    if (!database || typeof database !== 'object') return;
+    recovered.users.push(...(Array.isArray(database.users) ? database.users.filter(shouldRecoverUser) : []));
+    recovered.teams.push(...(Array.isArray(database.teams) ? database.teams.filter(shouldRecoverTeam) : []));
+    recovered.events.push(...(Array.isArray(database.events) ? database.events : []));
+    recovered.playerApplications.push(...(Array.isArray(database.playerApplications) ? database.playerApplications : []));
+    recovered.trainingSubmissions.push(...(Array.isArray(database.trainingSubmissions) ? database.trainingSubmissions : []));
+    recovered.eventRegistrationRequests.push(...(Array.isArray(database.eventRegistrationRequests) ? database.eventRegistrationRequests : []));
   });
 
-  return (Array.isArray(allUsers) ? allUsers : []).filter((user) => {
-    if (!hasValidDiscordId(user)) return false;
-    return refs.has(String(user.id || '').trim()) || refs.has(String(user.discordId || '').trim());
-  });
+  const deletedApplications = normalizeDeletedApplicationIds(currentDatabase);
+  recovered.playerApplications = filterDeletedApplications(recovered.playerApplications, deletedApplications);
+  return recovered;
 }
 
 async function collectRecoveryHistory() {
@@ -132,13 +193,18 @@ async function collectRecoveryHistory() {
     seenPaths.add(safePath);
     const backup = await githubBackups.fetchBackupFromGitHubPath(safePath).catch(() => null);
     const database = parseBackupDatabase(backup || {});
-    if (database) databases.push({ path: safePath, database });
+    if (database) databases.push({ path: safePath, database, summary: backup?.summary || {} });
   };
 
   await pushBackup(CLEAN_SNAPSHOT_PATH);
   const recent = await githubBackups.listBackupsFromGitHub({ limit: HISTORY_SCAN_LIMIT }).catch(() => []);
   for (const item of recent) await pushBackup(item.path);
   return databases;
+}
+
+function countAdded(current = [], merged = [], identityFn) {
+  const before = new Set((Array.isArray(current) ? current : []).map(identityFn).filter(Boolean));
+  return (Array.isArray(merged) ? merged : []).filter((item) => !before.has(identityFn(item))).length;
 }
 
 async function restoreRealStateIfNeeded(storage) {
@@ -150,62 +216,77 @@ async function restoreRealStateIfNeeded(storage) {
   const currentDatabase = parseBackupDatabase(currentBackup) || {};
   const currentUsers = Array.isArray(currentDatabase.users) ? currentDatabase.users : [];
   const currentTeams = Array.isArray(currentDatabase.teams) ? currentDatabase.teams : [];
+  const currentEvents = Array.isArray(currentDatabase.events) ? currentDatabase.events : [];
+  const currentApplications = filterDeletedApplications(currentDatabase.playerApplications || [], normalizeDeletedApplicationIds(currentDatabase));
+  const currentTraining = Array.isArray(currentDatabase.trainingSubmissions) ? currentDatabase.trainingSubmissions : [];
+  const currentRequests = Array.isArray(currentDatabase.eventRegistrationRequests) ? currentDatabase.eventRegistrationRequests : [];
 
   const history = await collectRecoveryHistory();
   if (!history.length) {
     return { success: true, skipped: true, reason: 'no_backup_history_available_current_data_preserved' };
   }
 
-  const recoveredTeamMap = new Map();
-  const allBackupUsers = [];
+  const recovered = collectRecoveryArrays(history, currentDatabase);
 
-  history.forEach(({ database }) => {
-    const teams = Array.isArray(database.teams) ? database.teams : [];
-    const users = Array.isArray(database.users) ? database.users : [];
-    allBackupUsers.push(...users);
-    teams.filter(shouldRecoverTeam).forEach((team) => {
-      const key = teamIdentity(team);
-      if (!key) return;
-      const previous = recoveredTeamMap.get(key);
-      const previousTime = new Date(previous?.updatedAt || previous?.createdAt || 0).getTime();
-      const nextTime = new Date(team.updatedAt || team.createdAt || 0).getTime();
-      if (!previous || nextTime >= previousTime) recoveredTeamMap.set(key, { ...team });
-    });
-  });
+  const mergedUsers = mergeByIdentity(currentUsers, recovered.users, userIdentity);
+  const mergedTeams = mergeByIdentity(currentTeams, recovered.teams, teamIdentity);
+  const mergedEvents = mergeByIdentity(currentEvents, recovered.events, (item) => recordIdentity(item, 'event'));
+  const mergedApplications = mergeByIdentity(currentApplications, recovered.playerApplications, (item) => recordIdentity(item, 'application'));
+  const mergedTraining = mergeByIdentity(currentTraining, recovered.trainingSubmissions, (item) => recordIdentity(item, 'training'));
+  const mergedRequests = mergeByIdentity(currentRequests, recovered.eventRegistrationRequests, (item) => recordIdentity(item, 'event-request'));
 
-  const recoveredTeams = Array.from(recoveredTeamMap.values());
-  const requiredFound = new Set(recoveredTeams.map(teamNameKey).filter((key) => REQUIRED_TEAM_KEYS.has(key)));
+  const addedUsers = countAdded(currentUsers, mergedUsers, userIdentity);
+  const addedTeams = countAdded(currentTeams, mergedTeams, teamIdentity);
+  const addedEvents = countAdded(currentEvents, mergedEvents, (item) => recordIdentity(item, 'event'));
+  const addedApplications = countAdded(currentApplications, mergedApplications, (item) => recordIdentity(item, 'application'));
+  const addedTraining = countAdded(currentTraining, mergedTraining, (item) => recordIdentity(item, 'training'));
+  const addedRequests = countAdded(currentRequests, mergedRequests, (item) => recordIdentity(item, 'event-request'));
+
+  const totalAdded = addedUsers + addedTeams + addedEvents + addedApplications + addedTraining + addedRequests;
+  const requiredFound = new Set(mergedTeams.map(teamNameKey).filter((key) => REQUIRED_TEAM_KEYS.has(key)));
   const missingRequired = [...REQUIRED_TEAM_KEYS].filter((key) => !requiredFound.has(key));
-  const recoveredUsers = collectReferencedUsers(allBackupUsers, recoveredTeams);
 
-  const mergedTeams = mergeTeams(currentTeams, recoveredTeams);
-  const mergedUsers = mergeUsers(currentUsers, recoveredUsers);
-  const beforeTeamIds = new Set(currentTeams.map(teamIdentity));
-  const addedTeams = mergedTeams.filter((team) => !beforeTeamIds.has(teamIdentity(team)));
-  const beforeUserIds = new Set(currentUsers.map(userIdentity).filter(Boolean));
-  const addedUsers = mergedUsers.filter((user) => !beforeUserIds.has(userIdentity(user)));
-
-  if (!addedTeams.length && !addedUsers.length) {
+  if (!totalAdded) {
     return {
       success: true,
       skipped: true,
-      reason: 'real_external_teams_and_players_already_present',
-      currentTeams: currentTeams.length,
-      currentUsers: currentUsers.length,
+      reason: 'all_current_real_data_already_present',
+      current: {
+        users: currentUsers.length,
+        teams: currentTeams.length,
+        events: currentEvents.length,
+        playerApplications: currentApplications.length,
+        trainingSubmissions: currentTraining.length,
+        eventRegistrationRequests: currentRequests.length
+      },
       requiredFound: [...requiredFound],
-      missingRequired
+      missingRequired,
+      scannedBackups: history.length
     };
   }
 
+  const deletedApplicationIds = Array.from(normalizeDeletedApplicationIds(currentDatabase));
   const nextDatabase = {
     ...currentDatabase,
     users: mergedUsers,
     teams: mergedTeams,
+    events: mergedEvents,
+    playerApplications: mergedApplications,
+    trainingSubmissions: mergedTraining,
+    eventRegistrationRequests: mergedRequests,
+    settings: {
+      ...(currentDatabase.settings || {}),
+      deletedPlayerApplicationIds,
+      forms: {
+        ...(currentDatabase.settings?.forms || {}),
+        deletedPlayerApplicationIds
+      }
+    },
     meta: {
       ...(currentDatabase.meta || {}),
-      usersTeamsRecoveredAt: new Date().toISOString(),
-      usersTeamsRecoveryPolicy: 'merge-current-plus-required-yung-thecreator-plus-non-owner-teams-from-history',
-      usersTeamsRecoveryScannedBackups: history.length
+      realDataMergeRecoveredAt: new Date().toISOString(),
+      realDataMergePolicy: 'current-plus-all-real-users-teams-events-forms-from-backups',
+      realDataMergeScannedBackups: history.length
     }
   };
 
@@ -217,21 +298,37 @@ async function restoreRealStateIfNeeded(storage) {
   });
 
   const savedBackup = await githubBackups.saveBackupToGitHub(storage, {
-    reason: 'real-external-teams-and-users-merged-after-recovery'
+    reason: 'merge-current-with-real-users-teams-events-forms'
   }).catch((error) => ({ success: false, message: error.message }));
 
   return {
     success: true,
     restored: true,
-    reason: 'missing_real_external_teams_and_players_merged_without_replacing_current_data',
-    addedTeams: addedTeams.map((team) => team.name || team.tag || team.id),
-    addedUsers: addedUsers.length,
+    reason: 'current_data_merged_with_real_backup_history_without_replacing_state',
+    addedUsers,
+    addedTeams,
+    addedEvents,
+    addedApplications,
+    addedTraining,
+    addedRequests,
+    before: {
+      users: currentUsers.length,
+      teams: currentTeams.length,
+      events: currentEvents.length,
+      playerApplications: currentApplications.length,
+      trainingSubmissions: currentTraining.length,
+      eventRegistrationRequests: currentRequests.length
+    },
+    after: {
+      users: mergedUsers.length,
+      teams: mergedTeams.length,
+      events: mergedEvents.length,
+      playerApplications: mergedApplications.length,
+      trainingSubmissions: mergedTraining.length,
+      eventRegistrationRequests: mergedRequests.length
+    },
     requiredFound: [...requiredFound],
     missingRequired,
-    beforeTeams: currentTeams.length,
-    afterTeams: mergedTeams.length,
-    beforeUsers: currentUsers.length,
-    afterUsers: mergedUsers.length,
     imported,
     backupAfterMerge: savedBackup
   };
@@ -245,7 +342,7 @@ async function recoverUsersAndTeamsFromBackup(storage) {
   const realState = await restoreRealStateIfNeeded(storage).catch((error) => ({
     success: false,
     skipped: true,
-    reason: 'real_state_recovery_failed_current_data_preserved',
+    reason: 'real_data_merge_failed_current_data_preserved',
     message: error.message
   }));
 
@@ -253,9 +350,9 @@ async function recoverUsersAndTeamsFromBackup(storage) {
     success: Boolean(realState.success),
     restored: Boolean(realState.restored),
     skipped: !realState.restored,
-    reason: realState.reason || 'real_state_checked',
+    reason: realState.reason || 'real_data_merge_checked',
     realState,
-    note: 'YUNG, The Creator e times reais de outros usuarios sao recuperados do historico sem remover cadastros atuais. Exclusoes manuais continuam protegidas pelos tombstones.'
+    note: 'Fluxo preservado: banco atual continua, dados reais ausentes de jogadores/times/eventos/formularios entram por merge, e formularios excluidos nao voltam.'
   };
 }
 
