@@ -16,50 +16,63 @@ if (!src.includes('GatewayIntentBits.DirectMessages')) {
   changed = true;
 }
 
-if (!src.includes('partials: [Partials.Channel]')) {
-  src = src.replace('    intents: [', '    partials: [Partials.Channel],\n    intents: [');
+if (!src.includes('partials: [Partials.Channel')) {
+  src = src.replace('    intents: [', '    partials: [Partials.Channel, Partials.Message, Partials.User],\n    intents: [');
+  changed = true;
+} else if (src.includes('partials: [Partials.Channel]')) {
+  src = src.replace('partials: [Partials.Channel]', 'partials: [Partials.Channel, Partials.Message, Partials.User]');
   changed = true;
 }
 
-if (!src.includes('voidarena_dm_log') || !src.includes('direction: \'inbound\'')) {
-  const marker = '  client.on(Events.MessageCreate, async (message) => {\n    try {\n      if (!message.guild || message.author.bot) return;';
-  const replacement = `  client.on(Events.MessageCreate, async (message) => {
-    try {
-      if (!message.guild && !message.author?.bot) {
-        const createdAt = message.createdAt?.toISOString?.() || new Date().toISOString();
-        const discordId = message.author?.id || '';
-        const attachments = extractDiscordMessageAttachments(message);
-        await saveChatMessage({
-          channelId: 'voidarena-dm-' + discordId,
-          source: 'discord-dm',
-          authorId: discordId,
-          authorName: message.author?.globalName || message.author?.username || discordId || 'Jogador',
-          authorAvatar: message.author?.displayAvatarURL?.({ size: 128 }) || '',
-          content: JSON.stringify({
-            type: 'voidarena_dm_log',
-            direction: 'inbound',
-            discordId,
-            text: String(message.content || '').slice(0, 1800),
-            deliveredToDiscord: true,
-            discordChannelId: message.channelId || '',
-            discordMessageId: message.id || '',
-            meta: { type: 'player_dm_reply' },
-            createdAt
-          }),
-          attachments,
-          discordMessageId: message.id || '',
-          discordChannelId: message.channelId || '',
-          createdAt
-        });
-        return;
-      }
+if (!src.includes('__voidArenaDmReplyCaptureInstalled')) {
+  const listener = [
+    '',
+    '  if (!client.__voidArenaDmReplyCaptureInstalled) {',
+    '    client.__voidArenaDmReplyCaptureInstalled = true;',
+    '    client.on(Events.MessageCreate, async (message) => {',
+    '      try {',
+    '        if (message.guild || message.author?.bot) return;',
+    '        if (message.partial && typeof message.fetch === \'function\') {',
+    '          try { message = await message.fetch(); } catch {}',
+    '        }',
+    '        const createdAt = message.createdAt?.toISOString?.() || new Date().toISOString();',
+    '        const discordId = String(message.author?.id || \'\').trim();',
+    '        if (!/^\\d{16,22}$/.test(discordId)) return;',
+    '        const attachments = extractDiscordMessageAttachments(message);',
+    '        await saveChatMessage({',
+    "          channelId: 'voidarena-dm-' + discordId,",
+    "          source: 'discord-dm',",
+    '          authorId: discordId,',
+    "          authorName: message.author?.globalName || message.author?.username || discordId || 'Jogador',",
+    '          authorAvatar: message.author?.displayAvatarURL?.({ size: 128 }) || \'\',',
+    '          content: JSON.stringify({',
+    "            type: 'voidarena_dm_log',",
+    "            direction: 'inbound',",
+    '            discordId,',
+    '            text: String(message.content || \'\').slice(0, 1800),',
+    '            deliveredToDiscord: true,',
+    '            discordChannelId: message.channelId || \'\',',
+    '            discordMessageId: message.id || \'\',',
+    "            meta: { type: 'player_dm_reply', capturedBy: 'dedicated_dm_listener' },",
+    '            createdAt',
+    '          }),',
+    '          attachments,',
+    '          discordMessageId: message.id || \'\',',
+    '          discordChannelId: message.channelId || \'\',',
+    '          createdAt',
+    '        });',
+    "        console.log('[DM] Resposta registrada de ' + discordId);",
+    '      } catch (error) {',
+    "        console.error('[DM] Falha ao registrar resposta:', error.message);",
+    '      }',
+    '    });',
+    '  }',
+    ''
+  ].join('\n');
 
-      if (!message.guild || message.author.bot) return;`;
-  if (src.includes(marker)) {
-    src = src.replace(marker, replacement);
-    changed = true;
-  }
+  src = src.replace('  client.on(Events.Error, (error) => {\n    console.error(\'❌ Erro do Discord Client:\', error);\n  });', '  client.on(Events.Error, (error) => {\n    console.error(\'❌ Erro do Discord Client:\', error);\n  });' + listener);
+  changed = true;
 }
 
 if (changed) fs.writeFileSync(file, src, 'utf8');
-console.log(changed ? 'Patch aplicado: respostas de DM passam a entrar no histórico.' : 'Patch ignorado: histórico de respostas de DM já ativo.');
+console.log(changed ? 'Patch aplicado: captura dedicada de respostas por DM ativa.' : 'Patch ignorado: captura dedicada de respostas por DM ja ativa.');
