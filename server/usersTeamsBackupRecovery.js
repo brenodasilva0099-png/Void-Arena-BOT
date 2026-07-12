@@ -89,8 +89,6 @@ function shouldRecoverTeam(team = {}) {
   const key = teamNameKey(team);
   if (REQUIRED_TEAM_KEYS.has(key)) return true;
   if (envTrue('REAL_DATA_RECOVER_ALL_TEAMS')) return true;
-  // Mantém o comportamento seguro anterior: recupera YUNG/The Creator e times reais criados por outros usuários.
-  // Se quiser puxar literalmente todos os times do histórico, basta definir REAL_DATA_RECOVER_ALL_TEAMS=true.
   return !isOwnerCreatedTeam(team);
 }
 
@@ -158,6 +156,10 @@ function filterDeletedApplications(applications = [], deletedIds = new Set()) {
   return (Array.isArray(applications) ? applications : []).filter((item) => !deletedIds.has(String(item?.id || '').trim()));
 }
 
+function databaseSupportTickets(database = {}) {
+  return Array.isArray(database.settings?.supportTickets) ? database.settings.supportTickets : [];
+}
+
 function collectRecoveryArrays(history = [], currentDatabase = {}) {
   const recovered = {
     users: [],
@@ -165,7 +167,8 @@ function collectRecoveryArrays(history = [], currentDatabase = {}) {
     events: [],
     playerApplications: [],
     trainingSubmissions: [],
-    eventRegistrationRequests: []
+    eventRegistrationRequests: [],
+    supportTickets: []
   };
 
   history.forEach(({ database }) => {
@@ -176,6 +179,7 @@ function collectRecoveryArrays(history = [], currentDatabase = {}) {
     recovered.playerApplications.push(...(Array.isArray(database.playerApplications) ? database.playerApplications : []));
     recovered.trainingSubmissions.push(...(Array.isArray(database.trainingSubmissions) ? database.trainingSubmissions : []));
     recovered.eventRegistrationRequests.push(...(Array.isArray(database.eventRegistrationRequests) ? database.eventRegistrationRequests : []));
+    recovered.supportTickets.push(...databaseSupportTickets(database));
   });
 
   const deletedApplications = normalizeDeletedApplicationIds(currentDatabase);
@@ -220,6 +224,7 @@ async function restoreRealStateIfNeeded(storage) {
   const currentApplications = filterDeletedApplications(currentDatabase.playerApplications || [], normalizeDeletedApplicationIds(currentDatabase));
   const currentTraining = Array.isArray(currentDatabase.trainingSubmissions) ? currentDatabase.trainingSubmissions : [];
   const currentRequests = Array.isArray(currentDatabase.eventRegistrationRequests) ? currentDatabase.eventRegistrationRequests : [];
+  const currentSupportTickets = databaseSupportTickets(currentDatabase);
 
   const history = await collectRecoveryHistory();
   if (!history.length) {
@@ -234,6 +239,7 @@ async function restoreRealStateIfNeeded(storage) {
   const mergedApplications = mergeByIdentity(currentApplications, recovered.playerApplications, (item) => recordIdentity(item, 'application'));
   const mergedTraining = mergeByIdentity(currentTraining, recovered.trainingSubmissions, (item) => recordIdentity(item, 'training'));
   const mergedRequests = mergeByIdentity(currentRequests, recovered.eventRegistrationRequests, (item) => recordIdentity(item, 'event-request'));
+  const mergedSupportTickets = mergeByIdentity(currentSupportTickets, recovered.supportTickets, (item) => recordIdentity(item, 'support'));
 
   const addedUsers = countAdded(currentUsers, mergedUsers, userIdentity);
   const addedTeams = countAdded(currentTeams, mergedTeams, teamIdentity);
@@ -241,8 +247,9 @@ async function restoreRealStateIfNeeded(storage) {
   const addedApplications = countAdded(currentApplications, mergedApplications, (item) => recordIdentity(item, 'application'));
   const addedTraining = countAdded(currentTraining, mergedTraining, (item) => recordIdentity(item, 'training'));
   const addedRequests = countAdded(currentRequests, mergedRequests, (item) => recordIdentity(item, 'event-request'));
+  const addedSupportTickets = countAdded(currentSupportTickets, mergedSupportTickets, (item) => recordIdentity(item, 'support'));
 
-  const totalAdded = addedUsers + addedTeams + addedEvents + addedApplications + addedTraining + addedRequests;
+  const totalAdded = addedUsers + addedTeams + addedEvents + addedApplications + addedTraining + addedRequests + addedSupportTickets;
   const requiredFound = new Set(mergedTeams.map(teamNameKey).filter((key) => REQUIRED_TEAM_KEYS.has(key)));
   const missingRequired = [...REQUIRED_TEAM_KEYS].filter((key) => !requiredFound.has(key));
 
@@ -257,7 +264,8 @@ async function restoreRealStateIfNeeded(storage) {
         events: currentEvents.length,
         playerApplications: currentApplications.length,
         trainingSubmissions: currentTraining.length,
-        eventRegistrationRequests: currentRequests.length
+        eventRegistrationRequests: currentRequests.length,
+        supportTickets: currentSupportTickets.length
       },
       requiredFound: [...requiredFound],
       missingRequired,
@@ -276,16 +284,22 @@ async function restoreRealStateIfNeeded(storage) {
     eventRegistrationRequests: mergedRequests,
     settings: {
       ...(currentDatabase.settings || {}),
+      supportTickets: mergedSupportTickets,
       deletedPlayerApplicationIds,
       forms: {
         ...(currentDatabase.settings?.forms || {}),
         deletedPlayerApplicationIds
+      },
+      support: {
+        ...(currentDatabase.settings?.support || {}),
+        updatedAt: new Date().toISOString(),
+        mergePolicy: 'current-plus-support-tickets-from-backups'
       }
     },
     meta: {
       ...(currentDatabase.meta || {}),
       realDataMergeRecoveredAt: new Date().toISOString(),
-      realDataMergePolicy: 'current-plus-all-real-users-teams-events-forms-from-backups',
+      realDataMergePolicy: 'current-plus-all-real-users-teams-events-forms-support-from-backups',
       realDataMergeScannedBackups: history.length
     }
   };
@@ -298,7 +312,7 @@ async function restoreRealStateIfNeeded(storage) {
   });
 
   const savedBackup = await githubBackups.saveBackupToGitHub(storage, {
-    reason: 'merge-current-with-real-users-teams-events-forms'
+    reason: 'merge-current-with-real-users-teams-events-forms-support'
   }).catch((error) => ({ success: false, message: error.message }));
 
   return {
@@ -311,13 +325,15 @@ async function restoreRealStateIfNeeded(storage) {
     addedApplications,
     addedTraining,
     addedRequests,
+    addedSupportTickets,
     before: {
       users: currentUsers.length,
       teams: currentTeams.length,
       events: currentEvents.length,
       playerApplications: currentApplications.length,
       trainingSubmissions: currentTraining.length,
-      eventRegistrationRequests: currentRequests.length
+      eventRegistrationRequests: currentRequests.length,
+      supportTickets: currentSupportTickets.length
     },
     after: {
       users: mergedUsers.length,
@@ -325,7 +341,8 @@ async function restoreRealStateIfNeeded(storage) {
       events: mergedEvents.length,
       playerApplications: mergedApplications.length,
       trainingSubmissions: mergedTraining.length,
-      eventRegistrationRequests: mergedRequests.length
+      eventRegistrationRequests: mergedRequests.length,
+      supportTickets: mergedSupportTickets.length
     },
     requiredFound: [...requiredFound],
     missingRequired,
@@ -352,7 +369,7 @@ async function recoverUsersAndTeamsFromBackup(storage) {
     skipped: !realState.restored,
     reason: realState.reason || 'real_data_merge_checked',
     realState,
-    note: 'Fluxo preservado: banco atual continua, dados reais ausentes de jogadores/times/eventos/formularios entram por merge, e formularios excluidos nao voltam.'
+    note: 'Fluxo preservado: banco atual continua, dados reais ausentes de jogadores/times/eventos/formularios/suporte entram por merge, e formularios excluidos nao voltam.'
   };
 }
 
