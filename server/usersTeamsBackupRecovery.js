@@ -2,9 +2,7 @@ const zlib = require('node:zlib');
 const githubBackups = require('./githubBackups');
 
 const CLEAN_SNAPSHOT_PATH = process.env.REAL_STATE_RECOVERY_BACKUP_PATH || 'backups/2026-07/void-arena-backup-2026-07-11T01-27-52-103Z.json';
-const OWNER_DISCORD_ID = String(process.env.OWNER_DISCORD_ID || '1235713276277559326').trim();
-const REQUIRED_TEAM_KEYS = new Set(['yung', 'thecreator']);
-const HISTORY_SCAN_LIMIT = Math.max(10, Math.min(150, Number(process.env.REAL_TEAM_RECOVERY_BACKUP_SCAN_LIMIT || 80) || 80));
+const HISTORY_SCAN_LIMIT = Math.max(10, Math.min(150, Number(process.env.REAL_TEAM_RECOVERY_BACKUP_SCAN_LIMIT || 120) || 120));
 
 function envTrue(name) {
   return String(process.env[name] || '').toLowerCase() === 'true';
@@ -37,8 +35,63 @@ function itemTime(item = {}) {
   );
 }
 
+function isPlainObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function hasValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (isPlainObject(value)) return Object.keys(value).length > 0;
+  return true;
+}
+
+function uniqueArray(values = []) {
+  const seen = new Set();
+  const out = [];
+  values.forEach((item) => {
+    const key = isPlainObject(item) ? JSON.stringify(item) : String(item || '');
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(item);
+  });
+  return out;
+}
+
+function deepMergeFillMissing(base = {}, extra = {}) {
+  const output = { ...(isPlainObject(extra) ? extra : {}), ...(isPlainObject(base) ? base : {}) };
+  Object.keys(extra || {}).forEach((key) => {
+    const currentValue = base?.[key];
+    const extraValue = extra?.[key];
+    if (Array.isArray(currentValue) || Array.isArray(extraValue)) {
+      output[key] = uniqueArray([...(Array.isArray(extraValue) ? extraValue : []), ...(Array.isArray(currentValue) ? currentValue : [])]);
+      return;
+    }
+    if (isPlainObject(currentValue) || isPlainObject(extraValue)) {
+      output[key] = deepMergeFillMissing(currentValue || {}, extraValue || {});
+      return;
+    }
+    output[key] = hasValue(currentValue) ? currentValue : extraValue;
+  });
+  Object.keys(base || {}).forEach((key) => {
+    if (!(key in output)) output[key] = base[key];
+  });
+  return output;
+}
+
+function stableJson(value) {
+  return JSON.stringify(value, Object.keys(value || {}).sort());
+}
+
 function userIdentity(user = {}) {
-  return String(user.discordId || user.id || '').trim();
+  const discordId = String(user.discordId || user.discord?.id || '').trim();
+  if (discordId) return `discord:${discordId}`;
+  const id = String(user.id || '').trim();
+  if (id) return `id:${id}`;
+  const email = String(user.email || '').trim().toLowerCase();
+  if (email) return `email:${email}`;
+  return '';
 }
 
 function teamIdentity(team = {}) {
@@ -60,41 +113,9 @@ function teamNameKey(team = {}) {
   return normalizeKey(team.name || team.title || team.tag || team.slug || '');
 }
 
-function teamDiscordIds(team = {}) {
-  const ids = new Set();
-  const add = (value) => {
-    const id = String(value || '').trim();
-    if (/^\d{16,22}$/.test(id)) ids.add(id);
-  };
-  add(team.ownerDiscordId);
-  add(team.directorDiscordId);
-  add(team.captainDiscordId);
-  (Array.isArray(team.playerAccounts?.players) ? team.playerAccounts.players : []).forEach(add);
-  (Array.isArray(team.playerAccounts?.reserves) ? team.playerAccounts.reserves : []).forEach(add);
-  (Array.isArray(team.playerDetails) ? team.playerDetails : []).forEach((player) => add(player?.discordId || player?.account));
-  (Array.isArray(team.reserveDetails) ? team.reserveDetails : []).forEach((player) => add(player?.discordId || player?.account));
-  return ids;
-}
-
-function isOwnerCreatedTeam(team = {}) {
-  if (!OWNER_DISCORD_ID) return false;
-  return [team.ownerDiscordId, team.directorDiscordId, team.captainDiscordId]
-    .map((value) => String(value || '').trim())
-    .some((id) => id === OWNER_DISCORD_ID);
-}
-
-function shouldRecoverTeam(team = {}) {
-  if (!team || typeof team !== 'object') return false;
-  if (team.deletedAt || team.removedAt || team.hidden) return false;
-  const key = teamNameKey(team);
-  if (REQUIRED_TEAM_KEYS.has(key)) return true;
-  if (envTrue('REAL_DATA_RECOVER_ALL_TEAMS')) return true;
-  return !isOwnerCreatedTeam(team);
-}
-
 function hasValidDiscordId(user = {}) {
   const discordId = String(user.discordId || user.discord?.id || '').trim();
-  return /^\d{16,22}$/.test(discordId) && !user.deletedAt && !user.hiddenFromPlayersDirectory;
+  return /^\d{16,22}$/.test(discordId);
 }
 
 function hasRealProfileSignal(user = {}) {
@@ -120,26 +141,63 @@ function shouldRecoverUser(user = {}) {
   return hasRealProfileSignal(user);
 }
 
+function shouldRecoverTeam(team = {}) {
+  if (!team || typeof team !== 'object') return false;
+  const name = String(team.name || team.title || team.tag || '').trim();
+  const id = String(team.id || '').trim();
+  return Boolean(name || id);
+}
+
+function sanitizeRecoveredUser(user = {}) {
+  const clean = deepMergeFillMissing({}, user);
+  delete clean.deletedAt;
+  delete clean.removedAt;
+  delete clean.hidden;
+  delete clean.hiddenFromPlayersDirectory;
+  clean.provider = clean.provider || clean.authProvider || 'discord';
+  clean.updatedAt = clean.updatedAt || clean.createdAt || new Date().toISOString();
+  return clean;
+}
+
+function sanitizeRecoveredTeam(team = {}) {
+  const clean = deepMergeFillMissing({}, team);
+  delete clean.deletedAt;
+  delete clean.removedAt;
+  delete clean.hidden;
+  delete clean.archived;
+  clean.updatedAt = clean.updatedAt || clean.createdAt || new Date().toISOString();
+  clean.recreateDeletedTeam = true;
+  clean.allowRegisteredDataRestore = true;
+  return clean;
+}
+
 function mergeByIdentity(currentItems = [], recoveredItems = [], identityFn, options = {}) {
   const map = new Map();
+  const modified = new Set();
   const put = (item, source) => {
     if (!item || typeof item !== 'object') return;
     const key = identityFn(item);
     if (!key) return;
     const previous = map.get(key);
+    const nextItem = options.sanitize ? options.sanitize(item) : item;
     if (!previous) {
-      map.set(key, { ...item });
+      map.set(key, { ...nextItem });
       return;
     }
+
     const previousTime = itemTime(previous);
-    const nextTime = itemTime(item);
-    const preferCurrent = source === 'current';
-    const shouldReplace = preferCurrent || nextTime >= previousTime || options.keepLatest === false;
-    map.set(key, shouldReplace ? { ...previous, ...item } : previous);
+    const nextTime = itemTime(nextItem);
+    const currentWins = source === 'current';
+    const newer = nextTime > previousTime;
+    const base = currentWins || !newer ? previous : nextItem;
+    const extra = currentWins || !newer ? nextItem : previous;
+    const merged = deepMergeFillMissing(base, extra);
+    if (stableJson(merged) !== stableJson(previous)) modified.add(key);
+    map.set(key, merged);
   };
   (Array.isArray(recoveredItems) ? recoveredItems : []).forEach((item) => put(item, 'recovered'));
   (Array.isArray(currentItems) ? currentItems : []).forEach((item) => put(item, 'current'));
-  return Array.from(map.values());
+  return { items: Array.from(map.values()), modified: modified.size };
 }
 
 function normalizeDeletedApplicationIds(database = {}) {
@@ -173,8 +231,8 @@ function collectRecoveryArrays(history = [], currentDatabase = {}) {
 
   history.forEach(({ database }) => {
     if (!database || typeof database !== 'object') return;
-    recovered.users.push(...(Array.isArray(database.users) ? database.users.filter(shouldRecoverUser) : []));
-    recovered.teams.push(...(Array.isArray(database.teams) ? database.teams.filter(shouldRecoverTeam) : []));
+    recovered.users.push(...(Array.isArray(database.users) ? database.users.filter(shouldRecoverUser).map(sanitizeRecoveredUser) : []));
+    recovered.teams.push(...(Array.isArray(database.teams) ? database.teams.filter(shouldRecoverTeam).map(sanitizeRecoveredTeam) : []));
     recovered.events.push(...(Array.isArray(database.events) ? database.events : []));
     recovered.playerApplications.push(...(Array.isArray(database.playerApplications) ? database.playerApplications : []));
     recovered.trainingSubmissions.push(...(Array.isArray(database.trainingSubmissions) ? database.trainingSubmissions : []));
@@ -191,8 +249,8 @@ async function collectRecoveryHistory() {
   const databases = [];
   const seenPaths = new Set();
 
-  const pushBackup = async (path) => {
-    const safePath = String(path || '').trim();
+  const pushBackup = async (backupPath) => {
+    const safePath = String(backupPath || '').trim();
     if (!safePath || seenPaths.has(safePath)) return;
     seenPaths.add(safePath);
     const backup = await githubBackups.fetchBackupFromGitHubPath(safePath).catch(() => null);
@@ -233,13 +291,21 @@ async function restoreRealStateIfNeeded(storage) {
 
   const recovered = collectRecoveryArrays(history, currentDatabase);
 
-  const mergedUsers = mergeByIdentity(currentUsers, recovered.users, userIdentity);
-  const mergedTeams = mergeByIdentity(currentTeams, recovered.teams, teamIdentity);
-  const mergedEvents = mergeByIdentity(currentEvents, recovered.events, (item) => recordIdentity(item, 'event'));
-  const mergedApplications = mergeByIdentity(currentApplications, recovered.playerApplications, (item) => recordIdentity(item, 'application'));
-  const mergedTraining = mergeByIdentity(currentTraining, recovered.trainingSubmissions, (item) => recordIdentity(item, 'training'));
-  const mergedRequests = mergeByIdentity(currentRequests, recovered.eventRegistrationRequests, (item) => recordIdentity(item, 'event-request'));
-  const mergedSupportTickets = mergeByIdentity(currentSupportTickets, recovered.supportTickets, (item) => recordIdentity(item, 'support'));
+  const usersMerge = mergeByIdentity(currentUsers, recovered.users, userIdentity, { sanitize: sanitizeRecoveredUser });
+  const teamsMerge = mergeByIdentity(currentTeams, recovered.teams, teamIdentity, { sanitize: sanitizeRecoveredTeam });
+  const eventsMerge = mergeByIdentity(currentEvents, recovered.events, (item) => recordIdentity(item, 'event'));
+  const applicationsMerge = mergeByIdentity(currentApplications, recovered.playerApplications, (item) => recordIdentity(item, 'application'));
+  const trainingMerge = mergeByIdentity(currentTraining, recovered.trainingSubmissions, (item) => recordIdentity(item, 'training'));
+  const requestsMerge = mergeByIdentity(currentRequests, recovered.eventRegistrationRequests, (item) => recordIdentity(item, 'event-request'));
+  const supportMerge = mergeByIdentity(currentSupportTickets, recovered.supportTickets, (item) => recordIdentity(item, 'support'));
+
+  const mergedUsers = usersMerge.items;
+  const mergedTeams = teamsMerge.items;
+  const mergedEvents = eventsMerge.items;
+  const mergedApplications = applicationsMerge.items;
+  const mergedTraining = trainingMerge.items;
+  const mergedRequests = requestsMerge.items;
+  const mergedSupportTickets = supportMerge.items;
 
   const addedUsers = countAdded(currentUsers, mergedUsers, userIdentity);
   const addedTeams = countAdded(currentTeams, mergedTeams, teamIdentity);
@@ -249,15 +315,23 @@ async function restoreRealStateIfNeeded(storage) {
   const addedRequests = countAdded(currentRequests, mergedRequests, (item) => recordIdentity(item, 'event-request'));
   const addedSupportTickets = countAdded(currentSupportTickets, mergedSupportTickets, (item) => recordIdentity(item, 'support'));
 
-  const totalAdded = addedUsers + addedTeams + addedEvents + addedApplications + addedTraining + addedRequests + addedSupportTickets;
-  const requiredFound = new Set(mergedTeams.map(teamNameKey).filter((key) => REQUIRED_TEAM_KEYS.has(key)));
-  const missingRequired = [...REQUIRED_TEAM_KEYS].filter((key) => !requiredFound.has(key));
+  const modifiedUsers = usersMerge.modified;
+  const modifiedTeams = teamsMerge.modified;
+  const modifiedEvents = eventsMerge.modified;
+  const modifiedApplications = applicationsMerge.modified;
+  const modifiedTraining = trainingMerge.modified;
+  const modifiedRequests = requestsMerge.modified;
+  const modifiedSupportTickets = supportMerge.modified;
 
-  if (!totalAdded) {
+  const totalAdded = addedUsers + addedTeams + addedEvents + addedApplications + addedTraining + addedRequests + addedSupportTickets;
+  const totalModified = modifiedUsers + modifiedTeams + modifiedEvents + modifiedApplications + modifiedTraining + modifiedRequests + modifiedSupportTickets;
+  const teamKeys = Array.from(new Set(mergedTeams.map(teamNameKey).filter(Boolean))).slice(0, 80);
+
+  if (!totalAdded && !totalModified) {
     return {
       success: true,
       skipped: true,
-      reason: 'all_current_real_data_already_present',
+      reason: 'all_current_registered_data_already_present',
       current: {
         users: currentUsers.length,
         teams: currentTeams.length,
@@ -267,9 +341,8 @@ async function restoreRealStateIfNeeded(storage) {
         eventRegistrationRequests: currentRequests.length,
         supportTickets: currentSupportTickets.length
       },
-      requiredFound: [...requiredFound],
-      missingRequired,
-      scannedBackups: history.length
+      scannedBackups: history.length,
+      teamKeys
     };
   }
 
@@ -298,8 +371,10 @@ async function restoreRealStateIfNeeded(storage) {
     },
     meta: {
       ...(currentDatabase.meta || {}),
+      allowRegisteredDataRestore: true,
+      restoreRegisteredPlayersAndTeams: true,
       realDataMergeRecoveredAt: new Date().toISOString(),
-      realDataMergePolicy: 'current-plus-all-real-users-teams-events-forms-support-from-backups',
+      realDataMergePolicy: 'current-plus-all-registered-users-teams-profiles-socials-logos-events-forms-support-from-backups',
       realDataMergeScannedBackups: history.length
     }
   };
@@ -307,18 +382,20 @@ async function restoreRealStateIfNeeded(storage) {
   const imported = await storage.importDatabaseBackup({
     type: 'void-arena-database-backup',
     version: 1,
+    allowRegisteredDataRestore: true,
     database: nextDatabase,
-    exportedAt: new Date().toISOString()
+    exportedAt: new Date().toISOString(),
+    meta: nextDatabase.meta
   });
 
   const savedBackup = await githubBackups.saveBackupToGitHub(storage, {
-    reason: 'merge-current-with-real-users-teams-events-forms-support'
+    reason: 'manual-restore-registered-players-teams-profiles-socials'
   }).catch((error) => ({ success: false, message: error.message }));
 
   return {
     success: true,
     restored: true,
-    reason: 'current_data_merged_with_real_backup_history_without_replacing_state',
+    reason: 'current_data_merged_with_registered_backup_history_without_replacing_state',
     addedUsers,
     addedTeams,
     addedEvents,
@@ -326,6 +403,13 @@ async function restoreRealStateIfNeeded(storage) {
     addedTraining,
     addedRequests,
     addedSupportTickets,
+    modifiedUsers,
+    modifiedTeams,
+    modifiedEvents,
+    modifiedApplications,
+    modifiedTraining,
+    modifiedRequests,
+    modifiedSupportTickets,
     before: {
       users: currentUsers.length,
       teams: currentTeams.length,
@@ -344,8 +428,8 @@ async function restoreRealStateIfNeeded(storage) {
       eventRegistrationRequests: mergedRequests.length,
       supportTickets: mergedSupportTickets.length
     },
-    requiredFound: [...requiredFound],
-    missingRequired,
+    scannedBackups: history.length,
+    teamKeys,
     imported,
     backupAfterMerge: savedBackup
   };
@@ -369,7 +453,9 @@ async function recoverUsersAndTeamsFromBackup(storage) {
     skipped: !realState.restored,
     reason: realState.reason || 'real_data_merge_checked',
     realState,
-    note: 'Fluxo preservado: banco atual continua, dados reais ausentes de jogadores/times/eventos/formularios/suporte entram por merge, e formularios excluidos nao voltam.'
+    restoredUsers: realState.addedUsers || 0,
+    restoredTeams: realState.addedTeams || 0,
+    note: 'Fluxo preservado: banco atual continua, dados registrados ausentes de jogadores/times/perfis/redes/logos/eventos/formularios/suporte entram por merge, e dados atuais vencem campos preenchidos.'
   };
 }
 
