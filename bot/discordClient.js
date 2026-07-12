@@ -10,6 +10,7 @@ const { registerBackupManager } = require('./backupManager');
 const { registerControlPanel } = require('./controlPanel');
 const { registerEventValidation } = require('./eventValidation');
 const { registerPlayerApplications } = require('./playerApplications');
+const { registerSupportSystem } = require('./supportSystem');
 const { registerMatchResultHandlers } = require('./matchResults');
 const { registerPlacarSystem } = require('./placarSystem');
 const { registerLegalCommands } = require('./legalCommands');
@@ -110,6 +111,7 @@ function registerDiscordHandlers(client) {
   registerControlPanel(client);
   registerEventValidation(client);
   registerPlayerApplications(client);
+  registerSupportSystem(client);
   registerMatchResultHandlers(client);
   registerPlacarSystem(client);
   registerLegalCommands(client);
@@ -182,27 +184,20 @@ function registerDiscordHandlers(client) {
   return client;
 }
 
-async function startDiscordBot(client = createDiscordClient()) {
+async function startDiscordBot(client) {
   registerDiscordHandlers(client);
 
   if (!TOKEN) {
-    console.warn('⚠️ DISCORD_TOKEN não encontrado no .env.');
-    console.warn('➡️ O bot não ficará online até preencher o token.');
-    return client;
+    console.warn('⚠️ DISCORD_TOKEN não configurado. Bot não será conectado ao Discord.');
+    return;
   }
 
-  try {
-    await client.login(TOKEN);
-  } catch (error) {
-    console.error('❌ Falha ao conectar o bot no Discord:', error.message);
-  }
-
-  return client;
+  await client.login(TOKEN);
 }
 
 module.exports = {
   createDiscordClient,
-  registerDiscordHandlers,
   startDiscordBot,
+  registerDiscordHandlers,
   extractDiscordMessageAttachments
 };
