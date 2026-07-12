@@ -46,6 +46,39 @@ function startScheduledBackups() {
   return timer;
 }
 
+async function maybeRunHistoricalRecovery() {
+  const enabled = String(process.env.REAL_STATE_RECOVERY_ENABLE || '').toLowerCase() === 'true';
+  const confirm = String(process.env.REAL_STATE_RECOVERY_CONFIRM || '').trim();
+
+  if (!enabled || confirm !== 'MERGE_BACKUP_HISTORY') {
+    console.log('Recuperacao historica pulada: fluxo normal preserva apenas banco atual + latest vivo.');
+    return { success: true, skipped: true, reason: 'historical_recovery_disabled' };
+  }
+
+  const recovery = await recoverUsersAndTeamsFromBackup(storage);
+  if (recovery?.restored) console.log(`Recuperacao historica: dados adicionados ao banco atual.`);
+  else console.log(`Recuperacao historica pulada: ${recovery?.reason || 'sem motivo'}.`);
+  return recovery;
+}
+
+async function gracefulShutdown(signal) {
+  console.log(`[Backup] ${signal} recebido. Salvando snapshot atual antes de encerrar...`);
+  try {
+    if (typeof storage.flushBackupAfterMutation === 'function') {
+      await storage.flushBackupAfterMutation(`shutdown-${signal}`);
+    } else {
+      await githubBackups.saveBackupToGitHub(storage, { reason: `shutdown-${signal}` });
+    }
+  } catch (error) {
+    console.error(`[Backup] Falha ao salvar snapshot no ${signal}:`, error.message);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.once('SIGINT', () => gracefulShutdown('SIGINT'));
+
 async function boot() {
   try {
     const guard = await runDeployDatabaseGuard(storage);
@@ -55,11 +88,9 @@ async function boot() {
   }
 
   try {
-    const recovery = await recoverUsersAndTeamsFromBackup(storage);
-    if (recovery?.restored) console.log(`Recuperacao users/teams: ${recovery.restoredUsers} usuario(s), ${recovery.restoredTeams} time(s).`);
-    else console.log(`Recuperacao users/teams pulada: ${recovery?.reason || 'sem motivo'}.`);
+    await maybeRunHistoricalRecovery();
   } catch (error) {
-    console.error('Recuperacao users/teams falhou:', error.message);
+    console.error('Recuperacao historica falhou:', error.message);
   }
 
   startInternalApi({ client, port: INTERNAL_API_PORT });
