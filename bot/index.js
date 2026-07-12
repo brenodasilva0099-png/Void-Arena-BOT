@@ -88,6 +88,11 @@ async function maybeRunRegisteredDataRestore() {
   }
 
   const recovery = await recoverUsersAndTeamsFromBackup(storage);
+  if (!recovery?.success) {
+    console.error(`Recuperacao de dados registrados nao marcou concluida: ${recovery?.reason || 'falha'}. Proximo boot tenta novamente.`);
+    return recovery;
+  }
+
   if (recovery?.restored) {
     const state = recovery.realState || {};
     console.log(`Recuperacao de dados registrados: +${state.addedUsers || 0} jogador(es), +${state.addedTeams || 0} time(s), modificados ${state.modifiedUsers || 0}/${state.modifiedTeams || 0}.`);
