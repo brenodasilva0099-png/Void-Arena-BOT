@@ -16,6 +16,9 @@ const githubBackups = require('../server/githubBackups');
 
 const SUPPORT_CHANNEL_NAME = process.env.SUPPORT_CHANNEL_NAME || '🛟・suporte-void-arena';
 const SUPPORT_CATEGORY_ID = String(process.env.SUPPORT_CATEGORY_ID || process.env.VOID_ARENA_CATEGORY_ID || '1523133579570184194').trim();
+const SUPPORT_PANEL_CHANNEL_ID = String(process.env.SUPPORT_PANEL_CHANNEL_ID || process.env.SUPPORT_TICKET_CHANNEL_ID || '1493602223035515082').trim();
+const SUPPORT_SITE_HISTORY_CHANNEL_ID = String(process.env.SUPPORT_SITE_HISTORY_CHANNEL_ID || 'site-main').trim() || 'site-main';
+const SUPPORT_PANEL_MARKER = 'void-arena-support-ticket-panel-v1';
 
 function canManage(member) {
   return Boolean(
@@ -145,15 +148,15 @@ function supportPanelEmbed() {
     .setDescription([
       'Encontrou erro no site, login, times, jogadores, formulários, chaveamento ou placar?',
       '',
-      'Clique no botão abaixo e descreva o problema.',
+      'Clique no botão abaixo para abrir um **ticket** e descreva o problema.',
       '',
       '🌐 **Local do problema**',
       '🧩 **O que aconteceu**',
       '📌 **Página ou seção afetada**',
-      '✅ A equipe recebe tudo organizado no site.'
+      '✅ O pedido fica salvo no site e a equipe recebe o histórico organizado.'
     ].join('\n'))
     .setColor(0x22d3ee)
-    .setFooter({ text: 'Void Arena • Central de Suporte' });
+    .setFooter({ text: `Void Arena • Central de Suporte • ${SUPPORT_PANEL_MARKER}` });
 }
 
 function panelComponents() {
@@ -161,17 +164,45 @@ function panelComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('voidsupport:open')
-        .setLabel('Abrir suporte')
+        .setLabel('Abrir ticket')
         .setEmoji('🛟')
         .setStyle(ButtonStyle.Primary)
     )
   ];
 }
 
+function supportPanelPayload() {
+  return { embeds: [supportPanelEmbed()], components: panelComponents() };
+}
+
 async function sendSupportPanel(messageOrChannel) {
-  const payload = { embeds: [supportPanelEmbed()], components: panelComponents() };
+  const payload = supportPanelPayload();
   if (typeof messageOrChannel.reply === 'function') return messageOrChannel.reply(payload);
   return messageOrChannel.send(payload);
+}
+
+async function ensureSupportPanelInChannel(client) {
+  if (!SUPPORT_PANEL_CHANNEL_ID || !client?.channels?.fetch) return { sent: false, reason: 'no_channel_id' };
+  const channel = await client.channels.fetch(SUPPORT_PANEL_CHANNEL_ID).catch(() => null);
+  if (!channel?.send || !channel?.messages?.fetch) return { sent: false, reason: 'invalid_channel' };
+
+  const payload = supportPanelPayload();
+  const recentMessages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  const existing = recentMessages?.find?.((message) => (
+    message.author?.id === client.user?.id &&
+    message.embeds?.some?.((embed) => String(embed.footer?.text || '').includes(SUPPORT_PANEL_MARKER))
+  ));
+
+  if (existing?.editable) {
+    await existing.edit(payload);
+    console.log(`[Suporte] Painel de ticket atualizado no canal ${SUPPORT_PANEL_CHANNEL_ID}.`);
+    return { sent: true, edited: true, channelId: SUPPORT_PANEL_CHANNEL_ID, messageId: existing.id };
+  }
+
+  const message = await channel.send(payload);
+  await message.pin?.('Painel fixo de suporte Void Arena').catch(() => null);
+  console.log(`[Suporte] Painel de ticket publicado no canal ${SUPPORT_PANEL_CHANNEL_ID}.`);
+  return { sent: true, edited: false, channelId: SUPPORT_PANEL_CHANNEL_ID, messageId: message.id };
 }
 
 function normalizeChannelName(name = '') {
@@ -245,7 +276,7 @@ function supportModal() {
 }
 
 async function notifySupportLog(client, ticket = {}) {
-  const channelId = String(process.env.SUPPORT_LOG_CHANNEL_ID || process.env.APPLICATION_LOG_CHANNEL_ID || process.env.TRAINING_LOG_CHANNEL_ID || '').trim();
+  const channelId = String(process.env.SUPPORT_LOG_CHANNEL_ID || process.env.APPLICATION_LOG_CHANNEL_ID || process.env.TRAINING_LOG_CHANNEL_ID || SUPPORT_PANEL_CHANNEL_ID || '').trim();
   if (!channelId || !client?.channels?.fetch) return { sent: false, reason: 'no_channel' };
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel?.send) return { sent: false, reason: 'invalid_channel' };
@@ -253,12 +284,13 @@ async function notifySupportLog(client, ticket = {}) {
   const message = await channel.send({
     embeds: [
       new EmbedBuilder()
-        .setTitle('🛟 Novo pedido de suporte')
+        .setTitle('🛟 Novo ticket de suporte')
         .setColor(0x22d3ee)
         .setDescription([
           `**Usuário:** ${ticket.userName || ticket.discordTag || 'Jogador'}`,
           `**Área:** ${ticket.category || '-'}`,
           `**Página:** ${ticket.page || '-'}`,
+          `**Protocolo:** ${ticket.id || '-'}`,
           '',
           `**Resumo:** ${ticket.title || '-'}`,
           '',
@@ -269,6 +301,37 @@ async function notifySupportLog(client, ticket = {}) {
   }).catch(() => null);
 
   return { sent: Boolean(message), channelId, messageId: message?.id || '' };
+}
+
+async function saveSupportHistoryMessage(ticket = {}, notification = {}) {
+  const lines = [
+    '🛟 **Novo ticket de suporte aberto**',
+    `Protocolo: ${ticket.id || '-'}`,
+    `Jogador: ${ticket.userName || ticket.discordTag || 'Jogador'}`,
+    `Área: ${ticket.category || '-'}`,
+    ticket.page ? `Página: ${ticket.page}` : '',
+    `Resumo: ${ticket.title || '-'}`,
+    notification?.channelId ? `Log Discord: <#${notification.channelId}>` : ''
+  ].filter(Boolean);
+
+  await storage.saveChatMessage({
+    channelId: SUPPORT_SITE_HISTORY_CHANNEL_ID,
+    source: 'system',
+    authorId: 'void-arena-support',
+    authorName: 'Suporte Void Arena',
+    authorAvatar: '/assets/hollow-nexus.png',
+    content: lines.join('\n'),
+    createdAt: ticket.createdAt || new Date().toISOString(),
+    meta: {
+      type: 'support_ticket_created',
+      ticketId: ticket.id || '',
+      discordId: ticket.discordId || '',
+      supportPanelChannelId: SUPPORT_PANEL_CHANNEL_ID,
+      supportLogChannelId: notification?.channelId || ''
+    }
+  }).catch((error) => {
+    console.error('[Suporte] Falha ao registrar ticket no historico do site:', error.message);
+  });
 }
 
 async function handleSupportModal(interaction) {
@@ -283,14 +346,15 @@ async function handleSupportModal(interaction) {
     page: interaction.fields.getTextInputValue('page'),
     description: interaction.fields.getTextInputValue('description')
   });
-  await notifySupportLog(interaction.client, ticket);
+  const notification = await notifySupportLog(interaction.client, ticket);
+  await saveSupportHistoryMessage(ticket, notification);
 
   await interaction.reply({
     ephemeral: true,
     embeds: [
       new EmbedBuilder()
-        .setTitle('✅ Suporte enviado')
-        .setDescription('Seu pedido foi salvo e a equipe recebeu o registro para análise.')
+        .setTitle('✅ Ticket enviado')
+        .setDescription('Seu ticket foi salvo no site e a equipe recebeu o registro no histórico para análise.')
         .setColor(0x22c55e)
         .addFields(
           { name: 'Protocolo', value: ticket.id, inline: false },
@@ -304,6 +368,12 @@ async function handleSupportModal(interaction) {
 function registerSupportSystem(client) {
   if (!client || client.__voidArenaSupportRegistered) return client;
   client.__voidArenaSupportRegistered = true;
+
+  client.once(Events.ClientReady, () => {
+    setTimeout(() => {
+      ensureSupportPanelInChannel(client).catch((error) => console.error('[Suporte] Falha ao publicar painel fixo:', error.message));
+    }, 8000).unref?.();
+  });
 
   client.on(Events.MessageCreate, async (message) => {
     if (!message.guild || message.author.bot) return;
@@ -355,5 +425,6 @@ module.exports = {
   readSupportTickets,
   saveSupportTicket,
   updateSupportTicketStatus,
-  deleteSupportTicket
+  deleteSupportTicket,
+  ensureSupportPanelInChannel
 };
