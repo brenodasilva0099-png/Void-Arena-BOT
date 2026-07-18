@@ -8,7 +8,7 @@ const {
 } = require('discord.js');
 
 const DEFAULT_SITE_URL = 'https://hollow-nexus-league.onrender.com';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v2';
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v3';
 const OLD_SITE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/i;
 const OLD_SITE_REPLACE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi;
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
@@ -56,10 +56,12 @@ function formPayload() {
     .setDescription([
       'Painel oficial para jogadores enviarem inscrição e manterem o cadastro atualizado.',
       '',
-      `🌐 **Formulários no site:** ${siteUrl('/pages/formularios.html')}`,
-      `🧾 **Inscrição direta:** ${siteUrl('/pages/inscricao.html')}`,
+      'Você pode escolher como preencher:',
+      '1️⃣ **Pelo Discord** — abre o formulário em etapas aqui no servidor.',
+      '2️⃣ **Pelo navegador** — abre o formulário direto no site.',
       '',
-      'Clique no botão abaixo para preencher pelo Discord.'
+      `🌐 **Formulários no site:** ${siteUrl('/pages/formularios.html')}`,
+      `🧾 **Inscrição direta:** ${siteUrl('/pages/inscricao.html')}`
     ].join('\n'))
     .setColor(0x8b5cf6)
     .setFooter({ text: `HNL • Formulários • ${REFRESH_MARKER}` })
@@ -70,9 +72,14 @@ function formPayload() {
     components: [new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('hollowform:start')
-        .setLabel('Preencher inscrição')
+        .setLabel('Preencher pelo Discord')
         .setEmoji('📋')
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setLabel('Abrir no navegador')
+        .setEmoji('🌐')
+        .setURL(siteUrl('/pages/inscricao.html'))
+        .setStyle(ButtonStyle.Link)
     )]
   };
 }
@@ -114,7 +121,7 @@ function detectPanel(message) {
     ])
   ].join('\n');
 
-  if (/Inscri[cç][aã]o Hollow Nexus|hollowform:start|Formul[áa]rios/i.test(text)) return 'form';
+  if (/Inscri[cç][aã]o Hollow Nexus|hollowform:start|Formul[áa]rios|Preencher pelo Discord|Abrir no navegador/i.test(text)) return 'form';
   if (/Central de Treinos|training:open|An[áa]lise de Partidas|Partidas\/Treinos/i.test(text)) return 'training';
   if (OLD_SITE_RE.test(text)) return 'old-link';
   return '';
