@@ -8,7 +8,7 @@ const {
 } = require('discord.js');
 
 const DEFAULT_SITE_URL = 'https://hollow-nexus-league.onrender.com';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v3';
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v4';
 const OLD_SITE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/i;
 const OLD_SITE_REPLACE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi;
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
@@ -110,9 +110,21 @@ function trainingPayload() {
   };
 }
 
+function componentText(message) {
+  return (message.components || [])
+    .flatMap((row) => row.components || [])
+    .flatMap((component) => [
+      component.customId || component.custom_id || '',
+      component.label || '',
+      component.url || ''
+    ])
+    .join('\n');
+}
+
 function detectPanel(message) {
   const text = [
     message.content || '',
+    componentText(message),
     ...(message.embeds || []).flatMap((embed) => [
       embed.title || '',
       embed.description || '',
@@ -121,7 +133,7 @@ function detectPanel(message) {
     ])
   ].join('\n');
 
-  if (/Inscri[cç][aã]o Hollow Nexus|hollowform:start|Formul[áa]rios|Preencher pelo Discord|Abrir no navegador/i.test(text)) return 'form';
+  if (/Formul[áa]rio de Inscri[cç][aã]o|Inscri[cç][aã]o\s*(?:•|—|-)?\s*Hollow Nexus|Inscri[cç][aã]o Hollow Nexus|hollowform:start|Formul[áa]rios|Preencher inscri[cç][aã]o|Preencher pelo Discord|Abrir no navegador|Voc[eê] pode preencher pelo Discord/i.test(text)) return 'form';
   if (/Central de Treinos|training:open|An[áa]lise de Partidas|Partidas\/Treinos/i.test(text)) return 'training';
   if (OLD_SITE_RE.test(text)) return 'old-link';
   return '';
@@ -155,7 +167,7 @@ async function updateKnownPanel(message, type) {
 
 async function scanAndRefreshChannel(channel, client) {
   if (!channel?.messages?.fetch || !channel?.isTextBased?.()) return { checked: 0, updated: 0, deleted: 0 };
-  const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
   const botMessages = Array.from(messages?.values?.() || []).filter((message) => message.author?.id === client.user?.id);
   let checked = 0;
   let updated = 0;
@@ -227,7 +239,7 @@ function registerPublicPanelRefresh(client) {
     try {
       if (!message.guild || message.author.bot) return;
       const content = String(message.content || '').trim().toLowerCase();
-      if (!['.paineis-refresh', '.painéis-refresh', '.refresh-paineis', '.refresh-painéis'].includes(content)) return;
+      if (!['.paineis-refresh', '.painéis-refresh', '.refresh-paineis', '.refresh-painéis', '.formulario-refresh', '.formulário-refresh', '.inscricao-refresh', '.inscrição-refresh'].includes(content)) return;
       if (!isStaff(message.member)) {
         await message.reply('❌ Apenas staff/admin pode atualizar os painéis públicos.');
         return;
