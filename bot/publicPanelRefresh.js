@@ -9,7 +9,8 @@ const {
 
 const DEFAULT_SITE_URL = 'https://hollow-nexus-league.onrender.com';
 const REFRESH_MARKER = 'hollow-nexus-public-panels-v2';
-const OLD_SITE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi;
+const OLD_SITE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/i;
+const OLD_SITE_REPLACE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi;
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
 
 function cleanBaseUrl(value = '') {
@@ -121,7 +122,7 @@ function detectPanel(message) {
 
 function replaceOldText(value = '') {
   return String(value || '')
-    .replace(OLD_SITE_RE, siteBaseUrl())
+    .replace(OLD_SITE_REPLACE_RE, siteBaseUrl())
     .replace(OLD_TITLE_RE, (match) => {
       if (/Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM/i.test(match)) return 'Hollow Nexus League';
       return 'Liga';
