@@ -9,7 +9,7 @@ async function main() {
   }) || null;
 
   const description = [
-    'Inscrições abertas até 18/07/2026 às 13:30 — Horário de Brasília.',
+    'Inscrições abertas até 25/07/2026 às 13:30 — Horário de Brasília.',
     'As premiações serão com base no total de times inscritos até a data do evento.',
     'Para mais detalhes como regras e reunião com líderes, entre no servidor.'
   ].join('\n\n');
@@ -24,7 +24,7 @@ async function main() {
     structure: existing?.structure || 'groups_playoffs',
     teamLimit: 32,
     minimumTeams: Number(existing?.minimumTeams || 4) || 4,
-    startAt: '2026-07-18T19:30',
+    startAt: '2026-07-25T19:30',
     status: existing?.status || 'open',
     description,
     registrations: Array.isArray(existing?.registrations) ? existing.registrations : [],
