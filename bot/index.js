@@ -22,6 +22,7 @@ const githubBackups = require('../server/githubBackups');
 const { runDeployDatabaseGuard } = require('../server/deployDatabaseGuard');
 const { installTeamDeletionGuard } = require('../server/teamDeletionGuard');
 const { recoverUsersAndTeamsFromBackup } = require('../server/usersTeamsBackupRecovery');
+const { repairRecoveredIdentityLinks } = require('../server/repairRecoveredIdentityLinks');
 
 installTeamDeletionGuard(storage);
 installAutoMutationBackup(storage, githubBackups);
@@ -157,19 +158,30 @@ async function maybeRunRegisteredDataRestore(options = {}) {
   }
 
   const recovery = await recoverUsersAndTeamsFromBackup(storage);
+  let identityRepair = null;
+  try {
+    identityRepair = await repairRecoveredIdentityLinks(storage);
+    console.log('[Banco/Recovery] Reparo de identidade:', identityRepair);
+  } catch (error) {
+    identityRepair = { success: false, retryRequired: true, reason: 'identity_link_repair_failed', message: error.message };
+    console.error('[Banco/Recovery] Reparo de identidade falhou:', error.message);
+  }
+
   const statusAfter = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
   const baselineRecovered = !statusAfter?.error && meetsRecoveryBaseline(statusAfter);
+  const identitiesRepaired = identityRepair?.success !== false;
 
-  if (!recovery?.success || !baselineRecovered) {
+  if (!recovery?.success || !baselineRecovered || !identitiesRepaired) {
     const result = {
       ...recovery,
       success: false,
       retryRequired: true,
-      reason: recovery?.reason || 'registered_restore_incomplete',
+      reason: !identitiesRepaired ? identityRepair.reason : (recovery?.reason || 'registered_restore_incomplete'),
       before: recoveryCounts(statusBefore),
       after: recoveryCounts(statusAfter),
       expected: { users: RECOVERY_EXPECTED_USERS, teams: RECOVERY_EXPECTED_TEAMS },
-      message: recovery?.message || 'O backup não repôs ainda todos os jogadores e times esperados. O marcador não será salvo e uma nova tentativa será feita.'
+      identityRepair,
+      message: identityRepair?.message || recovery?.message || 'O backup não repôs ainda todos os jogadores, times, perfis e vínculos esperados. O marcador não será salvo e uma nova tentativa será feita.'
     };
     console.error('[Banco/Recovery] Recuperacao incompleta:', result);
     return result;
@@ -184,7 +196,7 @@ async function maybeRunRegisteredDataRestore(options = {}) {
 
   const markerSaved = await writeRegisteredRestoreMarker(recovery, statusAfter);
   console.log('[Banco/Recovery] Baseline recuperada e confirmada:', markerSaved.summary);
-  return { ...recovery, success: true, statusBefore, statusAfter, marker: markerSaved };
+  return { ...recovery, success: true, statusBefore, statusAfter, identityRepair, marker: markerSaved };
 }
 
 async function gracefulShutdown(signal) {
