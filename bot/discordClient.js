@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits, Events } = require('discord.js');
+const { installOutboundMessageGuard } = require('./outboundMessageGuard');
 const {
   saveChatMessage,
   mergeChatMessageDiscordData,
@@ -15,6 +16,8 @@ const { registerMatchResultHandlers } = require('./matchResults');
 const { registerPlacarSystem } = require('./placarSystem');
 const { registerLegalCommands } = require('./legalCommands');
 const { installRematchAnnouncement } = require('./oneTimeRematchAnnouncement');
+
+installOutboundMessageGuard();
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID || process.env.DISCORD_CLIENT_ID;
