@@ -1,5 +1,3 @@
-const { Events } = require('discord.js');
-
 const REMATCH_ANNOUNCEMENT_CHANNEL_ID = '1494883146116890697';
 const VOID_ARENA_ROLE_ID = '1523438475716853851';
 const CAPTAIN_ROLE_ID = '1500546857460564158';
@@ -13,7 +11,7 @@ const ANNOUNCEMENT_PARTS = [
     '',
     '- Todos os jogadores e capitães devem usar o site da Void Arena logando com a própria conta do Discord:',
     '',
-    '🔗 **Site:** https://void-arena-site.onrender.com',
+    '🔗 **Site:** https://hollow-nexus-league.onrender.com',
     '',
     'O login com Discord é importante porque libera mais benefícios e deixa tudo mais fácil de usar, como:',
     '',
@@ -81,8 +79,8 @@ async function alreadySent(channel) {
       String(message.content || '').includes(ANNOUNCEMENT_MARKER)
     ));
   } catch (error) {
-    console.warn('[Rematch Aviso] Não consegui verificar duplicata. Vou tentar enviar mesmo assim:', error.message);
-    return false;
+    console.warn('[Rematch Aviso] Não consegui verificar duplicata:', error.message);
+    return true;
   }
 }
 
@@ -97,12 +95,10 @@ async function sendRematchAnnouncement(client, options = {}) {
     });
 
     if (!channel?.isTextBased?.()) {
-      console.error('[Rematch Aviso] Canal inválido ou sem suporte a texto:', REMATCH_ANNOUNCEMENT_CHANNEL_ID);
       return { success: false, reason: 'invalid_channel' };
     }
 
     if (!options.force && await alreadySent(channel)) {
-      console.log('[Rematch Aviso] Aviso já enviado anteriormente. Pulando duplicata.');
       return { success: true, skipped: true, reason: 'already_sent' };
     }
 
@@ -119,7 +115,6 @@ async function sendRematchAnnouncement(client, options = {}) {
       sentMessages.push(message.id);
     }
 
-    console.log(`[Rematch Aviso] Aviso enviado no canal ${REMATCH_ANNOUNCEMENT_CHANNEL_ID}: ${sentMessages.join(', ')}`);
     return { success: true, messageIds: sentMessages };
   } finally {
     sendInProgress = false;
@@ -127,20 +122,10 @@ async function sendRematchAnnouncement(client, options = {}) {
 }
 
 function installRematchAnnouncement(client) {
-  if (!client || client.__voidArenaRematchAnnouncementInstalled) return;
+  if (!client || client.__voidArenaRematchAnnouncementInstalled) return client;
   client.__voidArenaRematchAnnouncementInstalled = true;
-
-  const run = (label = 'ready') => {
-    sendRematchAnnouncement(client).catch((error) => {
-      console.error(`[Rematch Aviso] Falha ao enviar aviso (${label}):`, error.message);
-    });
-  };
-
-  client.once(Events.ClientReady, () => {
-    [5000, 30000, 90000].forEach((delay) => {
-      setTimeout(() => run(`${delay}ms`), delay).unref?.();
-    });
-  });
+  console.log('[Rematch Aviso] Envio automático no boot desativado. O aviso só pode ser enviado por ação manual explícita.');
+  return client;
 }
 
 module.exports = {
