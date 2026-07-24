@@ -62,8 +62,40 @@ replaceOnce(
   }`
 );
 
+replaceOnce(
+`async function readTeams() {
+  const db = await readDatabase();
+
+  if (Array.isArray(db.teams) && db.teams.length) {
+    return db.teams;
+  }
+
+  // Fallback de segurança: se o banco central estiver vazio por algum motivo,
+  // religa os times já cadastrados do arquivo legado teams.json.
+  const legacy = await readJsonIfExists(LEGACY_TEAMS_FILE, { teams: [] });
+  const legacyTeams = Array.isArray(legacy?.teams) ? legacy.teams : [];
+
+  if (legacyTeams.length) {
+    await updateDatabase((currentDb) => {
+      if (!Array.isArray(currentDb.teams) || !currentDb.teams.length) {
+        currentDb.teams = legacyTeams;
+      }
+      return currentDb.teams;
+    });
+
+    return legacyTeams;
+  }
+
+  return [];
+}`,
+`async function readTeams() {
+  const db = await readDatabase();
+  return Array.isArray(db.teams) ? db.teams : [];
+}`
+);
+
 if (changed) fs.writeFileSync(file, src, 'utf8');
 new Function(fs.readFileSync(file, 'utf8'));
 console.log(changed
-  ? '[Data/Purity] Backup bruto, eventos sem injeção e corrupção sem sobrescrita automática aplicados.'
+  ? '[Data/Purity] Backup bruto, eventos sem injeção, leitura sem escrita e corrupção sem sobrescrita automática aplicados.'
   : '[Data/Purity] Regras de fidelidade do banco já estavam aplicadas.');
