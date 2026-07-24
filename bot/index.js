@@ -29,8 +29,10 @@ installAutoMutationBackup(storage, githubBackups);
 const client = createDiscordClient();
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
-const REGISTERED_RESTORE_VERSION = process.env.REGISTERED_DATA_RESTORE_VERSION || 'registered-data-restore-2026-07-24-v3';
+const REGISTERED_RESTORE_VERSION = process.env.REGISTERED_DATA_RESTORE_VERSION || 'registered-data-restore-2026-07-24-v4';
 const REGISTERED_RESTORE_MARKER = path.join(DATA_DIR, 'registered-data-restore-marker.json');
+const RECOVERY_EXPECTED_USERS = Math.max(1, Number(process.env.RECOVERY_EXPECTED_USERS || 11) || 11);
+const RECOVERY_EXPECTED_TEAMS = Math.max(1, Number(process.env.RECOVERY_EXPECTED_TEAMS || 3) || 3);
 
 installVoidArenaDirectMessageRoutes({ client, storage });
 
@@ -82,48 +84,107 @@ async function readRegisteredRestoreMarker() {
   }
 }
 
-async function writeRegisteredRestoreMarker(recovery = {}) {
+function recoveryCounts(status = {}) {
+  return {
+    users: Number(status?.users || 0),
+    teams: Number(status?.teams || 0)
+  };
+}
+
+function meetsRecoveryBaseline(status = {}) {
+  const counts = recoveryCounts(status);
+  return counts.users >= RECOVERY_EXPECTED_USERS && counts.teams >= RECOVERY_EXPECTED_TEAMS;
+}
+
+async function writeRegisteredRestoreMarker(recovery = {}, status = {}) {
   await fs.mkdir(DATA_DIR, { recursive: true });
   const payload = {
     version: REGISTERED_RESTORE_VERSION,
+    completed: true,
     ranAt: new Date().toISOString(),
     restored: Boolean(recovery?.restored),
     reason: recovery?.reason || recovery?.realState?.reason || 'registered_data_restore_checked',
-    summary: recovery?.realState?.after || recovery?.realState?.current || null
+    expected: {
+      users: RECOVERY_EXPECTED_USERS,
+      teams: RECOVERY_EXPECTED_TEAMS
+    },
+    summary: recoveryCounts(status)
   };
   await fs.writeFile(REGISTERED_RESTORE_MARKER, JSON.stringify(payload, null, 2), 'utf8');
   return payload;
 }
 
-async function maybeRunRegisteredDataRestore() {
+async function maybeRunRegisteredDataRestore(options = {}) {
   if (String(process.env.REAL_STATE_RECOVERY_DISABLE || '').toLowerCase() === 'true') {
     return { success: true, skipped: true, reason: 'registered_restore_disabled' };
   }
 
+  const force = Boolean(options.force);
   const manual = String(process.env.REAL_STATE_RECOVERY_ENABLE || '').toLowerCase() === 'true' && String(process.env.REAL_STATE_RECOVERY_CONFIRM || '').trim() === 'MERGE_BACKUP_HISTORY';
   const marker = await readRegisteredRestoreMarker();
-  const shouldRun = manual || !marker || marker.version !== REGISTERED_RESTORE_VERSION;
+  const statusBefore = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
+  const markerCompleted = Boolean(marker?.completed && marker.version === REGISTERED_RESTORE_VERSION);
+  const belowBaseline = !statusBefore?.error && !meetsRecoveryBaseline(statusBefore);
+  const shouldRun = manual || !markerCompleted || (force && belowBaseline);
 
   if (!shouldRun) {
-    console.log(`Recuperacao de dados registrados pulada: ja executada (${marker.version}).`);
-    return { success: true, skipped: true, reason: 'registered_restore_already_ran', marker };
+    console.log(`Recuperacao de dados registrados pulada: concluida (${marker.version}) com ${marker.summary?.users || 0} jogador(es) e ${marker.summary?.teams || 0} time(s).`);
+    return { success: true, skipped: true, reason: 'registered_restore_already_completed', marker, status: statusBefore };
+  }
+
+  const backupConfig = githubBackups.getConfig();
+  console.log('[Banco/Recovery] Preparando recuperacao.', {
+    version: REGISTERED_RESTORE_VERSION,
+    force,
+    markerCompleted,
+    before: recoveryCounts(statusBefore),
+    expected: { users: RECOVERY_EXPECTED_USERS, teams: RECOVERY_EXPECTED_TEAMS },
+    backupRepo: backupConfig.repo || null,
+    backupTokenConfigured: Boolean(backupConfig.token)
+  });
+
+  if (!backupConfig.token) {
+    const result = {
+      success: false,
+      skipped: true,
+      retryRequired: true,
+      reason: 'github_backup_token_missing',
+      message: 'GITHUB_BACKUP_TOKEN/GITHUB_TOKEN não está configurado no serviço do BOT. O marcador não será salvo e o próximo boot tentará novamente.',
+      before: recoveryCounts(statusBefore)
+    };
+    console.error('[Banco/Recovery]', result.message);
+    return result;
   }
 
   const recovery = await recoverUsersAndTeamsFromBackup(storage);
-  if (!recovery?.success) {
-    console.error(`Recuperacao de dados registrados nao marcou concluida: ${recovery?.reason || 'falha'}. Proximo boot tenta novamente.`);
-    return recovery;
+  const statusAfter = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
+  const baselineRecovered = !statusAfter?.error && meetsRecoveryBaseline(statusAfter);
+
+  if (!recovery?.success || !baselineRecovered) {
+    const result = {
+      ...recovery,
+      success: false,
+      retryRequired: true,
+      reason: recovery?.reason || 'registered_restore_incomplete',
+      before: recoveryCounts(statusBefore),
+      after: recoveryCounts(statusAfter),
+      expected: { users: RECOVERY_EXPECTED_USERS, teams: RECOVERY_EXPECTED_TEAMS },
+      message: recovery?.message || 'O backup não repôs ainda todos os jogadores e times esperados. O marcador não será salvo e uma nova tentativa será feita.'
+    };
+    console.error('[Banco/Recovery] Recuperacao incompleta:', result);
+    return result;
   }
 
   if (recovery?.restored) {
     const state = recovery.realState || {};
     console.log(`Recuperacao de dados registrados: +${state.addedUsers || 0} jogador(es), +${state.addedTeams || 0} time(s), modificados ${state.modifiedUsers || 0}/${state.modifiedTeams || 0}.`);
   } else {
-    console.log(`Recuperacao de dados registrados pulada: ${recovery?.reason || 'sem motivo'}.`);
+    console.log(`Recuperacao de dados registrados validada: ${recovery?.reason || 'dados ja presentes'}.`);
   }
 
-  await writeRegisteredRestoreMarker(recovery);
-  return recovery;
+  const markerSaved = await writeRegisteredRestoreMarker(recovery, statusAfter);
+  console.log('[Banco/Recovery] Baseline recuperada e confirmada:', markerSaved.summary);
+  return { ...recovery, success: true, statusBefore, statusAfter, marker: markerSaved };
 }
 
 async function gracefulShutdown(signal) {
@@ -146,7 +207,7 @@ process.once('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function runStartupMaintenance(options = {}) {
   const force = Boolean(options.force);
-  if (startupMaintenancePromise && !force) return startupMaintenancePromise;
+  if (startupMaintenancePromise) return startupMaintenancePromise;
   if (startupMaintenanceStarted && !force) return null;
   startupMaintenanceStarted = true;
 
@@ -162,15 +223,17 @@ async function runStartupMaintenance(options = {}) {
       console.error('Deploy Guard do banco falhou:', error.message);
     }
 
+    let registeredRecovery = null;
     try {
-      await maybeRunRegisteredDataRestore();
+      registeredRecovery = await maybeRunRegisteredDataRestore({ force });
     } catch (error) {
+      registeredRecovery = { success: false, retryRequired: true, reason: 'registered_restore_threw', message: error.message };
       console.error('Recuperacao de dados registrados falhou:', error.message);
     }
 
     const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
     console.log('[Banco] Estado apos manutencao:', status);
-    return { guard, status };
+    return { guard, registeredRecovery, status };
   })();
 
   try {
@@ -194,7 +257,7 @@ async function boot() {
   startScheduledBackups();
   startEventDmSync(client, storage);
 
-  // Segunda verificação de segurança contra falha transitória do GitHub no boot.
+  // Segunda verificação contra falha transitória do GitHub no primeiro boot.
   setTimeout(() => {
     runStartupMaintenance({ force: true }).catch((error) => console.error('Segunda verificacao do banco falhou:', error.message));
   }, 30000).unref?.();
