@@ -20,6 +20,7 @@ const outboundGuard = read('bot/outboundMessageGuard.js');
 const githubBackups = read('server/githubBackups.js');
 const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
 const linksPatch = read('bot/patch-site-link-and-public-panels.js');
+const internalSecurityPatch = read('bot/patch-internal-api-security.js');
 
 for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('ensure-nexus-cup-event.js'), `${label} ainda grava/atualiza evento durante deploy`);
@@ -63,7 +64,12 @@ expect(storage.includes('O arquivo foi preservado e nenhuma restauração autom�
 
 expect(internalApi.includes("code: 'INTERNAL_TOKEN_NOT_CONFIGURED'"), 'API interna ainda permite acesso quando o token está ausente');
 expect(internalApi.includes("app.get('/public/status'"), 'diagnóstico público seguro do BOT está ausente');
-expect(internalApi.includes('markManualSend({'), 'envio manual da central não está explicitamente identificado');
+expect(internalApi.includes('manual = false'), 'API interna não diferencia envio manual de automático');
+expect(internalApi.includes('manual === true ? markManualSend(payload) : payload'), 'API interna não exige marcação manual explícita para atravessar o guard');
+expect(!internalApi.includes('channel.send(markManualSend({'), 'API interna ainda marca todo envio como manual automaticamente');
+expect(!internalApi.includes('message.edit(markManualSend({'), 'API interna ainda marca toda edição como manual automaticamente');
+expect(internalSecurityPatch.includes('manual = false'), 'patch de segurança não preserva distinção manual/automático');
+expect(internalSecurityPatch.includes('manual === true ? markManualSend(payload) : payload'), 'patch de segurança pode reintroduzir bypass automático');
 
 expect(eventDmSync.includes('https://hollow-nexus-league.onrender.com'), 'DM de evento ainda não usa o domínio atual');
 expect(!eventDmSync.includes(LEGACY_SITE_URL), 'DM de evento ainda contém domínio antigo da Void Arena');
@@ -81,4 +87,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] Backup somente de dados; restauração exata autorizada sem merge; leituras sem escrita; API interna protegida; mensagens automáticas bloqueadas.');
+console.log('[Data Safety Audit] Backup somente de dados; restauração exata autorizada sem merge; API interna exige ação manual explícita; mensagens automáticas bloqueadas.');
