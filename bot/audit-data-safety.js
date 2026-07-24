@@ -17,6 +17,7 @@ const eventDmSync = read('bot/eventDmSync.js');
 const announcement = read('bot/oneTimeRematchAnnouncement.js');
 const outboundGuard = read('bot/outboundMessageGuard.js');
 const githubBackups = read('server/githubBackups.js');
+const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
 
 for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('ensure-nexus-cup-event.js'), `${label} ainda grava/atualiza evento durante deploy`);
@@ -24,6 +25,8 @@ for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('patch-discord-data-backup.js'), `${label} ainda instala backup/restauração por canal Discord`);
   expect(command.includes('patch-storage-data-purity.js'), `${label} não aplica fidelidade do banco antes do BOT`);
   expect(command.includes('patch-internal-api-security.js'), `${label} não fecha a API interna antes do BOT`);
+  expect(command.includes('restore-latest-exact-if-incomplete.js'), `${label} não executa a restauração exata autorizada antes do BOT`);
+  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de aplicar a restauração exata`);
   expect(command.includes('audit-data-safety.js'), `${label} não executa auditoria final de dados`);
 }
 
@@ -36,6 +39,17 @@ for (const forbidden of [
 ]) {
   expect(!index.includes(forbidden), `bot/index.js ainda executa operação automática proibida: ${forbidden}`);
 }
+
+expect(exactRestore.includes("RESTORE_AUTHORIZATION = '2026-07-24-user-approved-exact-latest-v1'"), 'restauração exata não contém a autorização explícita registrada');
+expect(exactRestore.includes('activeDatabaseIsIncomplete'), 'restauração exata não valida se o banco atual está incompleto');
+expect(exactRestore.includes('users || 0) <= 1'), 'restauração exata não limita o banco atual a no máximo uma conta temporária');
+expect(exactRestore.includes('teams || 0) === 0'), 'restauração exata pode substituir banco que já possui times');
+expect(exactRestore.includes('events || 0) <= 1'), 'restauração exata não limita o scaffold de eventos');
+expect(exactRestore.includes('before-exact-restore'), 'restauração exata não preserva cópia do estado anterior');
+expect(exactRestore.includes('sha256(verifiedRaw) !== sha256(latest.raw)'), 'restauração exata não verifica integridade por hash');
+expect(exactRestore.includes('await fs.writeFile(tempFile, latest.raw'), 'restauração exata não grava o JSON bruto do latest');
+expect(!exactRestore.includes('importDatabaseBackup('), 'restauração exata ainda passa pelo importador normalizado');
+expect(!exactRestore.includes('saveUser(') && !exactRestore.includes('saveTeam('), 'restauração exata tenta fazer merge de usuários ou times');
 
 expect(!eventFieldsPatch.includes("require('./patch-discord-data-backup')"), 'patch de campos de evento ainda instala backup oculto pelo Discord');
 expect(!storage.includes('Array.isArray(rawEvents) && rawEvents.length ? rawEvents : DEFAULT_TOURNAMENT_EVENTS'), 'leitura do banco ainda injeta evento padrão');
@@ -54,6 +68,7 @@ expect(!eventDmSync.includes('https://void-arena-site.onrender.com'), 'DM de eve
 expect(announcement.includes('Envio automático no boot desativado'), 'aviso Rematch pode voltar a ser enviado no boot');
 expect(outboundGuard.includes("'1529298839121428592'") && outboundGuard.includes("'1524621308682436740'"), 'canais de avisos/regras não estão protegidos');
 
+expect(githubBackups.includes("DEFAULT_BACKUP_REPO = 'brenodasilva0099-png/Void-Arena-BACKUPS'"), 'repositório oficial de backup não está definido como fallback');
 expect(githubBackups.includes('const backup = await storage.exportDatabaseBackup();'), 'GitHub backup não usa exclusivamente o exportador do banco');
 expect(!githubBackups.includes("readFileSync(path.join(ROOT"), 'GitHub backup aparenta ler arquivos do sistema/código');
 
@@ -63,4 +78,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] Deploy somente de código; backup somente de dados; leituras sem escrita; API interna protegida; mensagens automáticas bloqueadas.');
+console.log('[Data Safety Audit] Backup somente de dados; restauração exata autorizada sem merge; leituras sem escrita; API interna protegida; mensagens automáticas bloqueadas.');
