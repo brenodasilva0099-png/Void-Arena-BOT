@@ -40,6 +40,8 @@ for (const forbidden of [
 expect(!eventFieldsPatch.includes("require('./patch-discord-data-backup')"), 'patch de campos de evento ainda instala backup oculto pelo Discord');
 expect(!storage.includes('Array.isArray(rawEvents) && rawEvents.length ? rawEvents : DEFAULT_TOURNAMENT_EVENTS'), 'leitura do banco ainda injeta evento padrão');
 expect(!storage.includes('normalized.unshift(normalizeTournamentEvent(DEFAULT_TOURNAMENT_EVENTS[0]))'), 'leitura do banco ainda força Coliseu no conjunto de eventos');
+expect(!storage.includes('religa os times já cadastrados do arquivo legado teams.json'), 'readTeams ainda importa e grava times legados durante leitura');
+expect(!/async function readTeams\(\)[\s\S]{0,1000}await updateDatabase/.test(storage), 'readTeams ainda executa escrita no banco');
 expect(storage.includes("const rawJson = await fs.readFile(DB_FILE, 'utf8');"), 'backup não exporta o arquivo bruto do banco');
 expect(storage.includes('O arquivo foi preservado e nenhuma restauração automática foi executada.'), 'banco corrompido ainda pode ser substituído automaticamente');
 
@@ -61,4 +63,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] Deploy somente de código; backup somente de dados; API interna protegida; mensagens automáticas bloqueadas.');
+console.log('[Data Safety Audit] Deploy somente de código; backup somente de dados; leituras sem escrita; API interna protegida; mensagens automáticas bloqueadas.');
