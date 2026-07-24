@@ -116,7 +116,6 @@ function patchPlayerApplications() {
 }`;
 
   src = src.replace(/async function sendPanel\(message\) \{[\s\S]*?\n\}/, sendPanelSource);
-
   src = src.replace(/📋 Nova inscrição Hollow Nexus/g, '📋 Nova inscrição Hollow Nexus League');
   src = src.replace(/Abra a página de Formulários no site para analisar a inscrição completa\./g, "Abra a página de Formulários no site para analisar a inscrição completa: " + "${siteUrl('/pages/formularios.html')}");
 
@@ -144,7 +143,10 @@ function patchPlacarSystem() {
 }
 
 function patchPlainOldLinks() {
-  const files = fs.readdirSync(BOT_DIR).filter((name) => name.endsWith('.js')).map((name) => path.join(BOT_DIR, name));
+  const files = fs.readdirSync(BOT_DIR)
+    .filter((name) => name.endsWith('.js') && !name.startsWith('patch-') && !name.startsWith('audit-'))
+    .map((name) => path.join(BOT_DIR, name));
+
   for (const file of files) {
     let src = read(file);
     if (!src) continue;
