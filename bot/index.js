@@ -1,5 +1,15 @@
 require('dotenv').config();
 
+if (!process.env.GITHUB_BACKUP_REPO) {
+  process.env.GITHUB_BACKUP_REPO = 'brenodasilva0099-png/Void-Arena-BACKUPS';
+}
+if (!process.env.GITHUB_BACKUP_AUTO_RESTORE) {
+  process.env.GITHUB_BACKUP_AUTO_RESTORE = 'true';
+}
+if (!process.env.GITHUB_BACKUP_RESTORE_LIVE_ON_REGRESSION) {
+  process.env.GITHUB_BACKUP_RESTORE_LIVE_ON_REGRESSION = 'true';
+}
+
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createDiscordClient, startDiscordBot } = require('./discordClient');
@@ -19,7 +29,7 @@ installAutoMutationBackup(storage, githubBackups);
 const client = createDiscordClient();
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
 const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(__dirname, '..', 'data');
-const REGISTERED_RESTORE_VERSION = process.env.REGISTERED_DATA_RESTORE_VERSION || 'registered-data-restore-2026-07-12-v2';
+const REGISTERED_RESTORE_VERSION = process.env.REGISTERED_DATA_RESTORE_VERSION || 'registered-data-restore-2026-07-24-v3';
 const REGISTERED_RESTORE_MARKER = path.join(DATA_DIR, 'registered-data-restore-marker.json');
 
 installVoidArenaDirectMessageRoutes({ client, storage });
@@ -27,6 +37,7 @@ installVoidArenaDirectMessageRoutes({ client, storage });
 let internalApiServer = null;
 let scheduledBackupTimer = null;
 let startupMaintenanceStarted = false;
+let startupMaintenancePromise = null;
 
 function ensureInternalApiStarted() {
   if (internalApiServer) return internalApiServer;
@@ -133,26 +144,48 @@ async function gracefulShutdown(signal) {
 process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.once('SIGINT', () => gracefulShutdown('SIGINT'));
 
-async function runStartupMaintenance() {
-  if (startupMaintenanceStarted) return;
+async function runStartupMaintenance(options = {}) {
+  const force = Boolean(options.force);
+  if (startupMaintenancePromise && !force) return startupMaintenancePromise;
+  if (startupMaintenanceStarted && !force) return null;
   startupMaintenanceStarted = true;
 
-  try {
-    const guard = await runDeployDatabaseGuard(storage);
-    console.log('Deploy Guard do banco:', guard?.reason || 'ok');
-  } catch (error) {
-    console.error('Deploy Guard do banco falhou:', error.message);
-  }
+  startupMaintenancePromise = (async () => {
+    let guard = null;
+    try {
+      guard = await runDeployDatabaseGuard(storage);
+      console.log('Deploy Guard do banco:', guard?.reason || 'ok');
+      if (guard?.restored) {
+        console.log('[Banco] Backup vivo restaurado antes de conectar o BOT ao Discord.');
+      }
+    } catch (error) {
+      console.error('Deploy Guard do banco falhou:', error.message);
+    }
+
+    try {
+      await maybeRunRegisteredDataRestore();
+    } catch (error) {
+      console.error('Recuperacao de dados registrados falhou:', error.message);
+    }
+
+    const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
+    console.log('[Banco] Estado apos manutencao:', status);
+    return { guard, status };
+  })();
 
   try {
-    await maybeRunRegisteredDataRestore();
-  } catch (error) {
-    console.error('Recuperacao de dados registrados falhou:', error.message);
+    return await startupMaintenancePromise;
+  } finally {
+    startupMaintenancePromise = null;
   }
 }
 
 async function boot() {
   ensureInternalApiStarted();
+
+  // O banco é verificado/restaurado antes do login no Discord para impedir
+  // que um deploy vazio publique mensagens, painéis ou dados incompletos.
+  await runStartupMaintenance();
 
   startDiscordBot(client).catch((error) => {
     console.error('Falha ao iniciar bot Discord:', error.message);
@@ -161,12 +194,16 @@ async function boot() {
   startScheduledBackups();
   startEventDmSync(client, storage);
 
+  // Segunda verificação de segurança contra falha transitória do GitHub no boot.
   setTimeout(() => {
-    runStartupMaintenance().catch((error) => console.error('Manutencao inicial falhou:', error.message));
-  }, 0).unref?.();
+    runStartupMaintenance({ force: true }).catch((error) => console.error('Segunda verificacao do banco falhou:', error.message));
+  }, 30000).unref?.();
 }
 
-boot();
+boot().catch((error) => {
+  console.error('Falha fatal ao iniciar o BOT:', error);
+  process.exitCode = 1;
+});
 
 process.on('unhandledRejection', (error) => console.error('Erro nao tratado no bot:', error));
 process.on('uncaughtException', (error) => console.error('Excecao nao tratada:', error));
