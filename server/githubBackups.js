@@ -1,9 +1,10 @@
 const DEFAULT_BRANCH = 'main';
+const DEFAULT_BACKUP_REPO = 'brenodasilva0099-png/Void-Arena-BACKUPS';
 
 function getConfig() {
   return {
     token: process.env.GITHUB_BACKUP_TOKEN || process.env.GITHUB_TOKEN || '',
-    repo: process.env.GITHUB_BACKUP_REPO || '',
+    repo: process.env.GITHUB_BACKUP_REPO || DEFAULT_BACKUP_REPO,
     branch: process.env.GITHUB_BACKUP_BRANCH || DEFAULT_BRANCH,
     prefix: String(process.env.GITHUB_BACKUP_PREFIX || 'void-arena').replace(/[^\w.-]+/g, '-'),
     autoRestore: String(process.env.GITHUB_BACKUP_AUTO_RESTORE || '').toLowerCase() === 'true'
