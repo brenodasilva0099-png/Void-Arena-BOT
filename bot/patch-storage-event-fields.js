@@ -5,12 +5,8 @@ const filePath = path.join(__dirname, '..', 'server', 'storage.js');
 let source = fs.readFileSync(filePath, 'utf8');
 let changed = false;
 
-try {
-  require('./patch-discord-data-backup');
-} catch (error) {
-  console.error('Patch backup do banco em canal falhou:', error.message);
-  source = fs.readFileSync(filePath, 'utf8');
-}
+// Este patch modifica apenas a estrutura do código. Backups e restaurações de dados
+// não são instalados aqui e nunca devem ser acionados implicitamente durante deploy.
 
 if (!source.includes('entryFee: String(raw.entryFee || raw.registrationFee')) {
   source = source.replace(
@@ -30,7 +26,7 @@ if (!source.includes('captainNoticeMessages: Array.isArray(raw.captainNoticeMess
 
 if (changed) {
   fs.writeFileSync(filePath, source, 'utf8');
-  console.log('Patch aplicado: campos extras de evento e DMs de capitaes preservados.');
+  console.log('Patch aplicado: campos extras de evento preservados sem tocar no banco.');
 } else {
-  console.log('Patch ignorado: campos extras de evento ja existem.');
+  console.log('Patch ignorado: campos extras de evento ja existem; nenhum dado foi alterado.');
 }
