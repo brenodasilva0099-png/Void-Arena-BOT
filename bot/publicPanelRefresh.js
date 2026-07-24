@@ -8,7 +8,7 @@ const {
 } = require('discord.js');
 
 const DEFAULT_SITE_URL = 'https://hollow-nexus-league.onrender.com';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v4';
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v5-manual-only';
 const OLD_SITE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/i;
 const OLD_SITE_REPLACE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi;
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
@@ -195,35 +195,28 @@ async function scanAndRefreshChannel(channel, client) {
 
 async function refreshPublicPanels(client, options = {}) {
   if (!client?.guilds?.cache || !client?.user) return { checked: 0, updated: 0, deleted: 0, channels: 0 };
-  const targetChannelIds = new Set(String(
-    options.channelIds ||
-    process.env.PUBLIC_PANEL_CHANNEL_IDS ||
-    process.env.PANEL_CHANNEL_IDS ||
-    process.env.PLAYER_APPLICATION_PANEL_CHANNEL_ID ||
-    process.env.APPLICATION_PANEL_CHANNEL_ID ||
-    process.env.TRAINING_PANEL_CHANNEL_ID ||
-    ''
-  ).split(',').map((item) => item.trim()).filter(Boolean));
+  const targetChannelIds = new Set(String(options.channelIds || '').split(',').map((item) => item.trim()).filter(Boolean));
+  if (!targetChannelIds.size) {
+    return { checked: 0, updated: 0, deleted: 0, channels: 0, skipped: true, reason: 'manual_channel_required' };
+  }
 
-  const scanAll = String(process.env.PUBLIC_PANEL_SCAN_ALL || 'true').toLowerCase() !== 'false';
   let totals = { checked: 0, updated: 0, deleted: 0, channels: 0 };
 
   for (const guild of client.guilds.cache.values()) {
     const channels = Array.from(guild.channels.cache.values()).filter((channel) => (
-      channel?.isTextBased?.() &&
-      (scanAll || targetChannelIds.has(channel.id))
+      channel?.isTextBased?.() && targetChannelIds.has(channel.id)
     ));
 
     for (const channel of channels) {
       const result = await scanAndRefreshChannel(channel, client).catch(() => ({ checked: 0, updated: 0, deleted: 0 }));
-      if (result.checked || targetChannelIds.has(channel.id)) totals.channels += 1;
+      totals.channels += 1;
       totals.checked += result.checked || 0;
       totals.updated += result.updated || 0;
       totals.deleted += result.deleted || 0;
     }
   }
 
-  console.log(`[Painéis] Refresh concluído: ${totals.updated} editado(s), ${totals.deleted} duplicado(s) apagado(s), ${totals.checked} mensagem(ns) checada(s).`);
+  console.log(`[Painéis/Manual] Refresh concluído: ${totals.updated} editado(s), ${totals.deleted} duplicado(s) apagado(s), ${totals.checked} mensagem(ns) checada(s).`);
   return totals;
 }
 
@@ -231,9 +224,9 @@ function registerPublicPanelRefresh(client) {
   if (!client || client.__hollowPublicPanelRefreshRegistered) return client;
   client.__hollowPublicPanelRefreshRegistered = true;
 
-  client.once(Events.ClientReady, () => {
-    setTimeout(() => refreshPublicPanels(client).catch((error) => console.error('[Painéis] refresh:', error.message)), 9000).unref?.();
-  });
+  // Nenhuma varredura, edição ou publicação acontece no ready/restart.
+  // A rotina só roda após comando explícito de um administrador no próprio canal.
+  console.log('[Painéis] Atualização automática no boot desativada; modo manual ativo.');
 
   client.on(Events.MessageCreate, async (message) => {
     try {
@@ -245,7 +238,7 @@ function registerPublicPanelRefresh(client) {
         return;
       }
       const result = await refreshPublicPanels(client, { channelIds: message.channelId });
-      await message.reply(`✅ Painéis revisados. Editados: **${result.updated}** • Apagados: **${result.deleted}** • Checados: **${result.checked}**.`);
+      await message.reply(`✅ Painéis revisados manualmente. Editados: **${result.updated}** • Apagados: **${result.deleted}** • Checados: **${result.checked}**.`);
     } catch (error) {
       await message.reply(`❌ Erro ao atualizar painéis: ${error.message}`).catch(() => null);
     }
