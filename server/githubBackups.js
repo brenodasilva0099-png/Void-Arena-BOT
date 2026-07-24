@@ -77,15 +77,10 @@ function summaryWeight(summary = {}) {
 }
 
 function reasonAllowsRegression(reason = '') {
-  const safe = String(reason || '').toLowerCase();
-  return (
-    safe.startsWith('mutation:') ||
-    safe.includes('manual') ||
-    safe.includes('delete') ||
-    safe.includes('exclu') ||
-    safe.includes('support-ticket-updated-current-state') ||
-    safe.includes('player-application-deleted-current-state')
-  );
+  // Nunca aceite regressão apenas porque uma função comum gravou o banco.
+  // Reduções só podem atualizar o latest quando houver uma operação destrutiva
+  // explicitamente aprovada e identificada por este prefixo.
+  return String(reason || '').toLowerCase().startsWith('approved-destructive:');
 }
 
 function regressionDetails(nextSummary = {}, latestSummary = {}) {
@@ -102,14 +97,7 @@ function looksDangerouslyEmpty(backup = {}, latest = null) {
 
 function looksLikeDataRegression(backup = {}, latest = null, reason = '') {
   if (!latest || reasonAllowsRegression(reason)) return false;
-  const details = regressionDetails(backup.summary || {}, latest.summary || {});
-  if (!details.length) return false;
-
-  // Boot, post-boot e backup agendado não podem transformar um banco menor em latest.
-  // Reduções intencionais devem passar por mutação real: deleteTeam, saveUser, formulários etc.
-  const safeReason = String(reason || '').toLowerCase();
-  const protectedReason = !safeReason || safeReason.includes('boot') || safeReason.includes('scheduled') || safeReason.includes('healthy') || safeReason.includes('restore') || safeReason.includes('merge');
-  return protectedReason;
+  return regressionDetails(backup.summary || {}, latest.summary || {}).length > 0;
 }
 
 async function saveBackupToGitHub(storage, options = {}) {
@@ -125,7 +113,7 @@ async function saveBackupToGitHub(storage, options = {}) {
         success: true,
         skipped: true,
         reason: 'dangerously_empty_backup_blocked',
-        message: 'Backup atual parece zerado de verdade. Latest preservado para evitar perda total.',
+        message: 'Snapshot atual está vazio. A cópia principal foi preservada.',
         attemptedSummary: backup.summary || {},
         latestSummary: latest?.summary || {},
         savedAt: now.toISOString()
@@ -137,7 +125,7 @@ async function saveBackupToGitHub(storage, options = {}) {
         success: true,
         skipped: true,
         reason: 'regressive_backup_blocked',
-        message: 'Backup de boot/agendado tinha menos dados que o latest. Latest preservado.',
+        message: 'Snapshot atual possui menos registros. A cópia principal não foi substituída.',
         attemptedSummary: backup.summary || {},
         latestSummary: latest?.summary || {},
         regression: regressionDetails(backup.summary || {}, latest.summary || {}),
@@ -148,7 +136,7 @@ async function saveBackupToGitHub(storage, options = {}) {
 
   const backupPath = `backups/${monthFolder(now)}/${backupFileName(config.prefix, now)}`;
   const latestPath = `latest/${config.prefix}-backup-latest.json`;
-  const manifestPath = `latest/manifest.json`;
+  const manifestPath = 'latest/manifest.json';
 
   const manifest = {
     success: true,
