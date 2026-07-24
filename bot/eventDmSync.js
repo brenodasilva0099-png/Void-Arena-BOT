@@ -4,7 +4,7 @@ let primed = false;
 
 function clean(value = '') { return String(value || '').trim(); }
 function eventTitle(event = {}) { return event.title || event.name || 'Evento Void Arena'; }
-function eventUrl() { return String(process.env.SITE_PUBLIC_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '') + '/pages/eventos.html'; }
+function eventUrl() { return String(process.env.SITE_PUBLIC_URL || 'https://hollow-nexus-league.onrender.com').replace(/\/$/, '') + '/pages/eventos.html'; }
 function messageContent(event = {}) {
   const title = eventTitle(event);
   const format = event.matchFormat || 'MD1';
