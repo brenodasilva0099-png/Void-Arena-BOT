@@ -5,6 +5,7 @@ const ROOT = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const failures = [];
 const expect = (condition, message) => { if (!condition) failures.push(message); };
+const LEGACY_SITE_URL = ['https://void-arena', 'site.onrender.com'].join('-');
 
 const packageJson = JSON.parse(read('package.json'));
 const start = String(packageJson.scripts?.start || '');
@@ -18,6 +19,7 @@ const announcement = read('bot/oneTimeRematchAnnouncement.js');
 const outboundGuard = read('bot/outboundMessageGuard.js');
 const githubBackups = read('server/githubBackups.js');
 const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
+const linksPatch = read('bot/patch-site-link-and-public-panels.js');
 
 for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('ensure-nexus-cup-event.js'), `${label} ainda grava/atualiza evento durante deploy`);
@@ -63,8 +65,9 @@ expect(internalApi.includes("code: 'INTERNAL_TOKEN_NOT_CONFIGURED'"), 'API inter
 expect(internalApi.includes("app.get('/public/status'"), 'diagnóstico público seguro do BOT está ausente');
 expect(internalApi.includes('markManualSend({'), 'envio manual da central não está explicitamente identificado');
 
-expect(eventDmSync.includes('https://hollow-nexus-league.onrender.com'), 'DM de evento ainda contém domínio antigo');
-expect(!eventDmSync.includes('https://void-arena-site.onrender.com'), 'DM de evento ainda contém domínio antigo da Void Arena');
+expect(eventDmSync.includes('https://hollow-nexus-league.onrender.com'), 'DM de evento ainda não usa o domínio atual');
+expect(!eventDmSync.includes(LEGACY_SITE_URL), 'DM de evento ainda contém domínio antigo da Void Arena');
+expect(linksPatch.includes("!name.startsWith('patch-')") && linksPatch.includes("!name.startsWith('audit-')"), 'patch de links ainda pode autoalterar patches ou auditorias');
 expect(announcement.includes('Envio automático no boot desativado'), 'aviso Rematch pode voltar a ser enviado no boot');
 expect(outboundGuard.includes("'1529298839121428592'") && outboundGuard.includes("'1524621308682436740'"), 'canais de avisos/regras não estão protegidos');
 
