@@ -20,6 +20,7 @@ const announcement = read('bot/oneTimeRematchAnnouncement.js');
 const outboundGuard = read('bot/outboundMessageGuard.js');
 const githubBackups = read('server/githubBackups.js');
 const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
+const emergencyRecovery = read('bot/recover-protected-data-union.js');
 const linksPatch = read('bot/patch-site-link-and-public-panels.js');
 const internalSecurityPatch = read('bot/patch-internal-api-security.js');
 const recoveryPatch = read('bot/patch-player-application-recovery.js');
@@ -35,9 +36,11 @@ for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(command.includes('patch-player-application-recovery.js'), `${label} não instala recuperação identificada de formulário`);
   expect(command.includes('patch-player-application-backup-confirmation.js'), `${label} não instala backup imediato de formulários`);
   expect(command.includes('restore-latest-exact-if-incomplete.js'), `${label} não executa a restauração exata autorizada antes do BOT`);
+  expect(command.includes('recover-protected-data-union.js'), `${label} não executa a recuperação protegida de jogadores/times/eventos`);
   expect(command.includes('recover-skzada-application.js'), `${label} não executa a recuperação autorizada do SKzada`);
   expect(command.indexOf('patch-player-application-recovery.js') < command.indexOf('restore-latest-exact-if-incomplete.js'), `${label} restaura o banco antes de preservar metadados de recuperação`);
-  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('recover-skzada-application.js'), `${label} procura o formulário antes de preparar o banco ativo`);
+  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('recover-protected-data-union.js'), `${label} executa a união protegida antes de preparar o banco-base`);
+  expect(command.indexOf('recover-protected-data-union.js') < command.indexOf('recover-skzada-application.js'), `${label} recupera formulário antes de restaurar jogadores/times/eventos`);
   expect(command.indexOf('recover-skzada-application.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de concluir a recuperação autorizada`);
   expect(command.includes('audit-data-safety.js'), `${label} não executa auditoria final de dados`);
 }
@@ -62,6 +65,18 @@ expect(exactRestore.includes('sha256(verifiedRaw) !== sha256(latest.raw)'), 'res
 expect(exactRestore.includes('await fs.writeFile(tempFile, latest.raw'), 'restauração exata não grava o JSON bruto do latest');
 expect(!exactRestore.includes('importDatabaseBackup('), 'restauração exata ainda passa pelo importador normalizado');
 expect(!exactRestore.includes('saveUser(') && !exactRestore.includes('saveTeam('), 'restauração exata tenta fazer merge de usuários ou times');
+
+expect(emergencyRecovery.includes("AUTHORIZATION = '2026-07-25-user-approved-emergency-protected-union-v1'"), 'união protegida não contém autorização explícita');
+expect(emergencyRecovery.includes('function mergePreferCurrent'), 'união protegida não prioriza o banco ativo');
+expect(emergencyRecovery.includes('before-protected-union'), 'união protegida não preserva cópia do estado anterior');
+expect(emergencyRecovery.includes("'users'"), 'união protegida não cobre jogadores');
+expect(emergencyRecovery.includes("'teams'"), 'união protegida não cobre times');
+expect(emergencyRecovery.includes("'events'"), 'união protegida não cobre competições');
+expect(emergencyRecovery.includes('listBackupsFromGitHub({ limit: 40 })'), 'união protegida não compara snapshots históricos');
+expect(emergencyRecovery.includes("reason: 'emergency-recovery:protected-union-2026-07-25'"), 'união protegida não salva novo latest');
+expect(emergencyRecovery.includes('after.users < 1 || after.teams < 1 || after.events < 1'), 'BOT pode iniciar sem jogadores, times ou competição');
+expect(!emergencyRecovery.includes('importDatabaseBackup('), 'união protegida usa importador que pode normalizar/substituir dados');
+expect(!emergencyRecovery.includes('saveUser(') && !emergencyRecovery.includes('saveTeam('), 'união protegida altera registros por rotinas individuais');
 
 expect(!eventFieldsPatch.includes("require('./patch-discord-data-backup')"), 'patch de campos de evento ainda instala backup oculto pelo Discord');
 expect(!storage.includes('Array.isArray(rawEvents) && rawEvents.length ? rawEvents : DEFAULT_TOURNAMENT_EVENTS'), 'leitura do banco ainda injeta evento padrão');
@@ -115,4 +130,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] Backup contabiliza formulários; recuperação do SKzada é isolada/deduplicada; novas inscrições aguardam snapshot; demais dados permanecem intocados.');
+console.log('[Data Safety Audit] Jogadores, times e competições protegidos por união de snapshots; backup completo confirmado antes do BOT ficar online.');
