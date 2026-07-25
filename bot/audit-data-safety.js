@@ -20,7 +20,8 @@ const announcement = read('bot/oneTimeRematchAnnouncement.js');
 const outboundGuard = read('bot/outboundMessageGuard.js');
 const githubBackups = read('server/githubBackups.js');
 const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
-const emergencyRecovery = read('bot/recover-protected-data-union.js');
+const teamIdentityPatch = read('bot/patch-storage-team-identity.js');
+const teamDedupe = read('bot/dedupe-team-records.js');
 const linksPatch = read('bot/patch-site-link-and-public-panels.js');
 const internalSecurityPatch = read('bot/patch-internal-api-security.js');
 const recoveryPatch = read('bot/patch-player-application-recovery.js');
@@ -31,98 +32,81 @@ for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('ensure-nexus-cup-event.js'), `${label} ainda grava/atualiza evento durante deploy`);
   expect(!command.includes('predeploy-backup.js'), `${label} ainda exporta backup implicitamente antes do boot`);
   expect(!command.includes('patch-discord-data-backup.js'), `${label} ainda instala backup/restauração por canal Discord`);
+  expect(!command.includes('recover-protected-data-union.js'), `${label} ainda executa a união emergencial em todo boot`);
   expect(command.includes('patch-storage-data-purity.js'), `${label} não aplica fidelidade do banco antes do BOT`);
+  expect(command.includes('patch-storage-team-identity.js'), `${label} não protege a identidade canônica dos times`);
   expect(command.includes('patch-internal-api-security.js'), `${label} não fecha a API interna antes do BOT`);
   expect(command.includes('patch-player-application-recovery.js'), `${label} não instala recuperação identificada de formulário`);
   expect(command.includes('patch-player-application-backup-confirmation.js'), `${label} não instala backup imediato de formulários`);
-  expect(command.includes('restore-latest-exact-if-incomplete.js'), `${label} não executa a restauração exata autorizada antes do BOT`);
-  expect(command.includes('recover-protected-data-union.js'), `${label} não executa a recuperação protegida de jogadores/times/eventos`);
+  expect(command.includes('restore-latest-exact-if-incomplete.js'), `${label} não prepara banco ausente antes do BOT`);
+  expect(command.includes('dedupe-team-records.js'), `${label} não consolida duplicatas de time existentes`);
   expect(command.includes('recover-skzada-application.js'), `${label} não executa a recuperação autorizada do SKzada`);
-  expect(command.indexOf('patch-player-application-recovery.js') < command.indexOf('restore-latest-exact-if-incomplete.js'), `${label} restaura o banco antes de preservar metadados de recuperação`);
-  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('recover-protected-data-union.js'), `${label} executa a união protegida antes de preparar o banco-base`);
-  expect(command.indexOf('recover-protected-data-union.js') < command.indexOf('recover-skzada-application.js'), `${label} recupera formulário antes de restaurar jogadores/times/eventos`);
-  expect(command.indexOf('recover-skzada-application.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de concluir a recuperação autorizada`);
+  expect(command.indexOf('patch-storage-team-identity.js') < command.indexOf('restore-latest-exact-if-incomplete.js'), `${label} instala a identidade de time tarde demais`);
+  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('dedupe-team-records.js'), `${label} deduplica antes de preparar o banco-base`);
+  expect(command.indexOf('dedupe-team-records.js') < command.indexOf('recover-skzada-application.js'), `${label} recupera formulário antes de estabilizar times`);
+  expect(command.indexOf('recover-skzada-application.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de concluir as recuperações autorizadas`);
   expect(command.includes('audit-data-safety.js'), `${label} não executa auditoria final de dados`);
 }
 
-for (const forbidden of [
-  'autoRestoreLatestBackup(',
-  'restoreLatestBackupFromGitHub(',
-  'restoreBackupFromGitHubPath(',
-  'runDeployDatabaseGuard(',
-  'importDatabaseBackup('
-]) {
+for (const forbidden of ['autoRestoreLatestBackup(', 'restoreLatestBackupFromGitHub(', 'restoreBackupFromGitHubPath(', 'runDeployDatabaseGuard(', 'importDatabaseBackup(']) {
   expect(!index.includes(forbidden), `bot/index.js ainda executa operação automática proibida: ${forbidden}`);
 }
 
-expect(exactRestore.includes("RESTORE_AUTHORIZATION = '2026-07-24-user-approved-exact-latest-v1'"), 'restauração exata não contém a autorização explícita registrada');
-expect(exactRestore.includes('activeDatabaseIsIncomplete'), 'restauração exata não valida se o banco atual está incompleto');
-expect(exactRestore.includes('users || 0) <= 1'), 'restauração exata não limita o banco atual a no máximo uma conta temporária');
-expect(exactRestore.includes('teams || 0) === 0'), 'restauração exata pode substituir banco que já possui times');
-expect(exactRestore.includes('events || 0) <= 1'), 'restauração exata não limita o scaffold de eventos');
-expect(exactRestore.includes('before-exact-restore'), 'restauração exata não preserva cópia do estado anterior');
-expect(exactRestore.includes('sha256(verifiedRaw) !== sha256(latest.raw)'), 'restauração exata não verifica integridade por hash');
-expect(exactRestore.includes('await fs.writeFile(tempFile, latest.raw'), 'restauração exata não grava o JSON bruto do latest');
-expect(!exactRestore.includes('importDatabaseBackup('), 'restauração exata ainda passa pelo importador normalizado');
-expect(!exactRestore.includes('saveUser(') && !exactRestore.includes('saveTeam('), 'restauração exata tenta fazer merge de usuários ou times');
+expect(exactRestore.includes("RESTORE_AUTHORIZATION = '2026-07-24-user-approved-exact-latest-v1'"), 'restauração exata não contém autorização explícita');
+expect(exactRestore.includes('activeDatabaseIsIncomplete'), 'restauração exata não valida banco incompleto');
+expect(exactRestore.includes('teams || 0) === 0'), 'restauração exata pode substituir banco com times');
+expect(exactRestore.includes('before-exact-restore'), 'restauração exata não preserva cópia anterior');
+expect(!exactRestore.includes('importDatabaseBackup('), 'restauração exata usa importador normalizado');
 
-expect(emergencyRecovery.includes("AUTHORIZATION = '2026-07-25-user-approved-emergency-protected-union-v1'"), 'união protegida não contém autorização explícita');
-expect(emergencyRecovery.includes('function mergePreferCurrent'), 'união protegida não prioriza o banco ativo');
-expect(emergencyRecovery.includes('before-protected-union'), 'união protegida não preserva cópia do estado anterior');
-expect(emergencyRecovery.includes("'users'"), 'união protegida não cobre jogadores');
-expect(emergencyRecovery.includes("'teams'"), 'união protegida não cobre times');
-expect(emergencyRecovery.includes("'events'"), 'união protegida não cobre competições');
-expect(emergencyRecovery.includes('listBackupsFromGitHub({ limit: 40 })'), 'união protegida não compara snapshots históricos');
-expect(emergencyRecovery.includes("reason: 'emergency-recovery:protected-union-2026-07-25'"), 'união protegida não salva novo latest');
-expect(emergencyRecovery.includes('after.users < 1 || after.teams < 1 || after.events < 1'), 'BOT pode iniciar sem jogadores, times ou competição');
-expect(!emergencyRecovery.includes('importDatabaseBackup('), 'união protegida usa importador que pode normalizar/substituir dados');
-expect(!emergencyRecovery.includes('saveUser(') && !emergencyRecovery.includes('saveTeam('), 'união protegida altera registros por rotinas individuais');
+expect(teamIdentityPatch.includes('teamsRepresentSameClub'), 'patch de identidade não compara clubes semanticamente');
+expect(teamIdentityPatch.includes('leadershipOverlap && (sameName || sameTag)'), 'patch de identidade pode unir times apenas por nome/tag parcial');
+expect(teamIdentityPatch.includes('id: current.id || team.id'), 'saveTeam não preserva o ID canônico');
+expect(teamIdentityPatch.includes('validStoredTeamImage'), 'saveTeam não rejeita logo inválida');
+expect(storage.includes('function teamsRepresentSameClub'), 'storage final não contém proteção contra duplicação');
 
-expect(!eventFieldsPatch.includes("require('./patch-discord-data-backup')"), 'patch de campos de evento ainda instala backup oculto pelo Discord');
-expect(!storage.includes('Array.isArray(rawEvents) && rawEvents.length ? rawEvents : DEFAULT_TOURNAMENT_EVENTS'), 'leitura do banco ainda injeta evento padrão');
-expect(!storage.includes('normalized.unshift(normalizeTournamentEvent(DEFAULT_TOURNAMENT_EVENTS[0]))'), 'leitura do banco ainda força Coliseu no conjunto de eventos');
-expect(!storage.includes('religa os times já cadastrados do arquivo legado teams.json'), 'readTeams ainda importa e grava times legados durante leitura');
-expect(!/async function readTeams\(\)[\s\S]{0,1000}await updateDatabase/.test(storage), 'readTeams ainda executa escrita no banco');
-expect(storage.includes("const rawJson = await fs.readFile(DB_FILE, 'utf8');"), 'backup não exporta o arquivo bruto do banco');
+expect(teamDedupe.includes("AUTHORIZATION = '2026-07-25-user-approved-team-dedup-v1'"), 'deduplicação não contém autorização explícita');
+expect(teamDedupe.includes('function sameClub'), 'deduplicação não possui identidade semântica');
+expect(teamDedupe.includes('before-team-dedup'), 'deduplicação não preserva cópia do banco');
+expect(teamDedupe.includes('remapIds'), 'deduplicação não remapeia IDs antigos');
+expect(teamDedupe.includes('chooseLogo'), 'deduplicação não seleciona logo válida mais recente');
+expect(teamDedupe.includes('novaRage'), 'deduplicação não registra diagnóstico do Nova Rage');
+expect(teamDedupe.includes("reason: 'team-dedup-and-logo-validation-2026-07-25'"), 'deduplicação não salva snapshot pós-correção');
+expect(!teamDedupe.includes('recover-protected-data-union'), 'deduplicação ainda depende da união emergencial');
+
+expect(!eventFieldsPatch.includes("require('./patch-discord-data-backup')"), 'patch de evento ainda instala backup oculto pelo Discord');
+expect(!storage.includes('Array.isArray(rawEvents) && rawEvents.length ? rawEvents : DEFAULT_TOURNAMENT_EVENTS'), 'leitura ainda injeta evento padrão');
+expect(!storage.includes('normalized.unshift(normalizeTournamentEvent(DEFAULT_TOURNAMENT_EVENTS[0]))'), 'leitura ainda força Coliseu');
+expect(!storage.includes('religa os times já cadastrados do arquivo legado teams.json'), 'readTeams ainda restaura times durante leitura');
+expect(!/async function readTeams\(\)[\s\S]{0,1000}await updateDatabase/.test(storage), 'readTeams ainda escreve no banco');
+expect(storage.includes("const rawJson = await fs.readFile(DB_FILE, 'utf8');"), 'backup não exporta arquivo bruto');
 expect(storage.includes('O arquivo foi preservado e nenhuma restauração automática foi executada.'), 'banco corrompido ainda pode ser substituído automaticamente');
-expect(storage.includes('playerApplications: Array.isArray(db.playerApplications)'), 'resumo do backup ainda ignora formulários');
-expect(storage.includes('eventRegistrationRequests: Array.isArray(db.eventRegistrationRequests)'), 'resumo do backup ainda ignora inscrições de eventos');
+expect(storage.includes('playerApplications: Array.isArray(db.playerApplications)'), 'resumo ignora formulários');
+expect(storage.includes('eventRegistrationRequests: Array.isArray(db.eventRegistrationRequests)'), 'resumo ignora inscrições de evento');
 
-expect(recoveryPatch.includes('async function recoverPlayerApplication(payload = {})'), 'patch de recuperação não cria método isolado');
-expect(recoveryPatch.includes('alreadyPresent: true'), 'recuperação não evita duplicata');
-expect(recoveryPatch.includes('recovery: raw.recovery && typeof raw.recovery'), 'metadados de recuperação não são preservados');
-expect(recoveryScript.includes("AUTHORIZATION = '2026-07-25-user-approved-recover-skzada-v1'"), 'recuperação do SKzada não contém autorização explícita');
-expect(recoveryScript.includes("TARGET_NAME = 'skzada'"), 'recuperação não está limitada ao SKzada');
-expect(recoveryScript.includes('isComplete(backupMatch.application)'), 'recuperação não prioriza registro completo do backup');
-expect(recoveryScript.includes("mode: 'partial-from-discord-log'"), 'fallback parcial não é identificado');
-expect(recoveryScript.includes("reason: 'approved-recovery:player-application-SKzada'"), 'recuperação não publica snapshot específico após concluir');
+expect(recoveryPatch.includes('async function recoverPlayerApplication(payload = {})'), 'patch de formulário não cria recuperação isolada');
+expect(recoveryPatch.includes('alreadyPresent: true'), 'recuperação de formulário não evita duplicata');
+expect(recoveryScript.includes("TARGET_NAME = 'skzada'"), 'recuperação de formulário não está limitada ao SKzada');
 for (const forbidden of ['saveUser(', 'saveTeam(', 'deleteTeam(', 'saveTournamentEvent(', 'importDatabaseBackup(']) {
   expect(!recoveryScript.includes(forbidden), `recuperação do SKzada tenta alterar outro setor: ${forbidden}`);
 }
 
-expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-site-create')"), 'formulário do site não aguarda snapshot imediato');
-expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-discord-create')"), 'formulário do Discord não aguarda snapshot imediato');
-expect(internalApi.includes("flushBackupAfterMutation('player-application-site-create')"), 'API interna não recebeu proteção imediata de formulário');
-expect(playerApplications.includes("flushBackupAfterMutation('player-application-discord-create')"), 'formulário Discord não recebeu proteção imediata');
+expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-site-create')"), 'formulário do site não aguarda snapshot');
+expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-discord-create')"), 'formulário Discord não aguarda snapshot');
+expect(internalApi.includes("code: 'INTERNAL_TOKEN_NOT_CONFIGURED'"), 'API interna permite acesso sem token');
+expect(internalApi.includes("app.get('/public/status'"), 'diagnóstico público do BOT ausente');
+expect(internalApi.includes('manual = false'), 'API interna não diferencia envio manual');
+expect(internalApi.includes('manual === true ? markManualSend(payload) : payload'), 'API interna não exige marcação manual');
+expect(!internalApi.includes('channel.send(markManualSend({'), 'API interna marca todo envio como manual');
+expect(!internalApi.includes('message.edit(markManualSend({'), 'API interna marca toda edição como manual');
+expect(internalSecurityPatch.includes('manual = false'), 'patch de segurança não preserva modo manual');
 
-expect(internalApi.includes("code: 'INTERNAL_TOKEN_NOT_CONFIGURED'"), 'API interna ainda permite acesso quando o token está ausente');
-expect(internalApi.includes("app.get('/public/status'"), 'diagnóstico público seguro do BOT está ausente');
-expect(internalApi.includes('manual = false'), 'API interna não diferencia envio manual de automático');
-expect(internalApi.includes('manual === true ? markManualSend(payload) : payload'), 'API interna não exige marcação manual explícita para atravessar o guard');
-expect(!internalApi.includes('channel.send(markManualSend({'), 'API interna ainda marca todo envio como manual automaticamente');
-expect(!internalApi.includes('message.edit(markManualSend({'), 'API interna ainda marca toda edição como manual automaticamente');
-expect(internalSecurityPatch.includes('manual = false'), 'patch de segurança não preserva distinção manual/automático');
-expect(internalSecurityPatch.includes('manual === true ? markManualSend(payload) : payload'), 'patch de segurança pode reintroduzir bypass automático');
-
-expect(eventDmSync.includes('https://hollow-nexus-league.onrender.com'), 'DM de evento ainda não usa o domínio atual');
-expect(!eventDmSync.includes(LEGACY_SITE_URL), 'DM de evento ainda contém domínio antigo da Void Arena');
-expect(linksPatch.includes("!name.startsWith('patch-')") && linksPatch.includes("!name.startsWith('audit-')"), 'patch de links ainda pode autoalterar patches ou auditorias');
-expect(announcement.includes('Envio automático no boot desativado'), 'aviso Rematch pode voltar a ser enviado no boot');
-expect(outboundGuard.includes("'1529298839121428592'") && outboundGuard.includes("'1524621308682436740'"), 'canais de avisos/regras não estão protegidos');
-
-expect(githubBackups.includes("DEFAULT_BACKUP_REPO = 'brenodasilva0099-png/Void-Arena-BACKUPS'"), 'repositório oficial de backup não está definido como fallback');
-expect(githubBackups.includes('const backup = await storage.exportDatabaseBackup();'), 'GitHub backup não usa exclusivamente o exportador do banco');
-expect(!githubBackups.includes("readFileSync(path.join(ROOT"), 'GitHub backup aparenta ler arquivos do sistema/código');
+expect(eventDmSync.includes('https://hollow-nexus-league.onrender.com'), 'DM de evento usa domínio antigo');
+expect(!eventDmSync.includes(LEGACY_SITE_URL), 'DM de evento contém domínio antigo');
+expect(linksPatch.includes("!name.startsWith('patch-')") && linksPatch.includes("!name.startsWith('audit-')"), 'patch de links pode alterar auditorias');
+expect(announcement.includes('Envio automático no boot desativado'), 'aviso Rematch pode voltar no boot');
+expect(outboundGuard.includes("'1529298839121428592'") && outboundGuard.includes("'1524621308682436740'"), 'canais protegidos ausentes');
+expect(githubBackups.includes("DEFAULT_BACKUP_REPO = 'brenodasilva0099-png/Void-Arena-BACKUPS'"), 'repositório de backup padrão ausente');
+expect(githubBackups.includes('const backup = await storage.exportDatabaseBackup();'), 'GitHub backup não usa exportador do banco');
 
 if (failures.length) {
   failures.forEach((failure) => console.error(`[Data Safety Audit] ${failure}`));
@@ -130,4 +114,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] Jogadores, times e competições protegidos por união de snapshots; backup completo confirmado antes do BOT ficar online.');
+console.log('[Data Safety Audit] União emergencial removida do boot; times usam identidade canônica, duplicatas são consolidadas e logos inválidas são rejeitadas.');
