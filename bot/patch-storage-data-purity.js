@@ -94,8 +94,28 @@ replaceOnce(
 }`
 );
 
+replaceOnce(
+`    events: Array.isArray(db.events) ? db.events.length : 0,
+    trainingSubmissions: Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions.length : 0,
+    messages: Array.isArray(db.messages) ? db.messages.length : 0,`,
+`    events: Array.isArray(db.events) ? db.events.length : 0,
+    playerApplications: Array.isArray(db.playerApplications) ? db.playerApplications.length : 0,
+    trainingSubmissions: Array.isArray(db.trainingSubmissions) ? db.trainingSubmissions.length : 0,
+    eventRegistrationRequests: Array.isArray(db.eventRegistrationRequests) ? db.eventRegistrationRequests.length : 0,
+    messages: Array.isArray(db.messages) ? db.messages.length : 0,`
+);
+
 if (changed) fs.writeFileSync(file, src, 'utf8');
-new Function(fs.readFileSync(file, 'utf8'));
+const finalSource = fs.readFileSync(file, 'utf8');
+new Function(finalSource);
+for (const marker of [
+  "const rawJson = await fs.readFile(DB_FILE, 'utf8');",
+  'playerApplications: Array.isArray(db.playerApplications)',
+  'eventRegistrationRequests: Array.isArray(db.eventRegistrationRequests)',
+  'O arquivo foi preservado e nenhuma restauração automática foi executada.'
+]) {
+  if (!finalSource.includes(marker)) throw new Error(`Regra de fidelidade ausente: ${marker}`);
+}
 console.log(changed
-  ? '[Data/Purity] Backup bruto, eventos sem injeção, leitura sem escrita e corrupção sem sobrescrita automática aplicados.'
+  ? '[Data/Purity] Backup bruto, formulários contabilizados, eventos sem injeção, leitura sem escrita e corrupção preservada.'
   : '[Data/Purity] Regras de fidelidade do banco já estavam aplicadas.');
