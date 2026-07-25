@@ -214,22 +214,27 @@ async function main() {
     }
   }
 
-  let nextDatabase = { ...database, teams: deduped };
-  if (idMap.size) nextDatabase = remapIds(nextDatabase, idMap);
-  nextDatabase.meta = {
-    ...(isPlainObject(nextDatabase.meta) ? nextDatabase.meta : {}),
-    updatedAt: new Date().toISOString(),
-    teamIdentityRepair: {
-      authorization: AUTHORIZATION,
-      repairedAt: new Date().toISOString(),
-      before: teams.length,
-      after: deduped.length,
-      mergedGroups
-    }
-  };
+  let candidateDatabase = { ...database, teams: deduped };
+  if (idMap.size) candidateDatabase = remapIds(candidateDatabase, idMap);
+  const changed = JSON.stringify(database) !== JSON.stringify(candidateDatabase);
+  let nextDatabase = candidateDatabase;
 
-  const changed = JSON.stringify(database) !== JSON.stringify(nextDatabase);
   if (changed) {
+    nextDatabase = {
+      ...candidateDatabase,
+      meta: {
+        ...(isPlainObject(candidateDatabase.meta) ? candidateDatabase.meta : {}),
+        updatedAt: new Date().toISOString(),
+        teamIdentityRepair: {
+          authorization: AUTHORIZATION,
+          repairedAt: new Date().toISOString(),
+          before: teams.length,
+          after: deduped.length,
+          mergedGroups
+        }
+      }
+    };
+
     await fs.mkdir(DATA_DIR, { recursive: true });
     const safety = path.join(DATA_DIR, `abyss-tournament-db.before-team-dedup-${Date.now()}.json`);
     await fs.writeFile(safety, raw, 'utf8');
