@@ -13,6 +13,7 @@ const dev = String(packageJson.scripts?.dev || '');
 const index = read('bot/index.js');
 const storage = read('server/storage.js');
 const internalApi = read('bot/internalApi.js');
+const playerApplications = read('bot/playerApplications.js');
 const eventFieldsPatch = read('bot/patch-storage-event-fields.js');
 const eventDmSync = read('bot/eventDmSync.js');
 const announcement = read('bot/oneTimeRematchAnnouncement.js');
@@ -21,6 +22,9 @@ const githubBackups = read('server/githubBackups.js');
 const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
 const linksPatch = read('bot/patch-site-link-and-public-panels.js');
 const internalSecurityPatch = read('bot/patch-internal-api-security.js');
+const recoveryPatch = read('bot/patch-player-application-recovery.js');
+const recoveryScript = read('bot/recover-skzada-application.js');
+const backupConfirmationPatch = read('bot/patch-player-application-backup-confirmation.js');
 
 for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('ensure-nexus-cup-event.js'), `${label} ainda grava/atualiza evento durante deploy`);
@@ -28,8 +32,13 @@ for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('patch-discord-data-backup.js'), `${label} ainda instala backup/restauração por canal Discord`);
   expect(command.includes('patch-storage-data-purity.js'), `${label} não aplica fidelidade do banco antes do BOT`);
   expect(command.includes('patch-internal-api-security.js'), `${label} não fecha a API interna antes do BOT`);
+  expect(command.includes('patch-player-application-recovery.js'), `${label} não instala recuperação identificada de formulário`);
+  expect(command.includes('patch-player-application-backup-confirmation.js'), `${label} não instala backup imediato de formulários`);
   expect(command.includes('restore-latest-exact-if-incomplete.js'), `${label} não executa a restauração exata autorizada antes do BOT`);
-  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de aplicar a restauração exata`);
+  expect(command.includes('recover-skzada-application.js'), `${label} não executa a recuperação autorizada do SKzada`);
+  expect(command.indexOf('patch-player-application-recovery.js') < command.indexOf('restore-latest-exact-if-incomplete.js'), `${label} restaura o banco antes de preservar metadados de recuperação`);
+  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('recover-skzada-application.js'), `${label} procura o formulário antes de preparar o banco ativo`);
+  expect(command.indexOf('recover-skzada-application.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de concluir a recuperação autorizada`);
   expect(command.includes('audit-data-safety.js'), `${label} não executa auditoria final de dados`);
 }
 
@@ -61,6 +70,25 @@ expect(!storage.includes('religa os times já cadastrados do arquivo legado team
 expect(!/async function readTeams\(\)[\s\S]{0,1000}await updateDatabase/.test(storage), 'readTeams ainda executa escrita no banco');
 expect(storage.includes("const rawJson = await fs.readFile(DB_FILE, 'utf8');"), 'backup não exporta o arquivo bruto do banco');
 expect(storage.includes('O arquivo foi preservado e nenhuma restauração automática foi executada.'), 'banco corrompido ainda pode ser substituído automaticamente');
+expect(storage.includes('playerApplications: Array.isArray(db.playerApplications)'), 'resumo do backup ainda ignora formulários');
+expect(storage.includes('eventRegistrationRequests: Array.isArray(db.eventRegistrationRequests)'), 'resumo do backup ainda ignora inscrições de eventos');
+
+expect(recoveryPatch.includes('async function recoverPlayerApplication(payload = {})'), 'patch de recuperação não cria método isolado');
+expect(recoveryPatch.includes('alreadyPresent: true'), 'recuperação não evita duplicata');
+expect(recoveryPatch.includes('recovery: raw.recovery && typeof raw.recovery'), 'metadados de recuperação não são preservados');
+expect(recoveryScript.includes("AUTHORIZATION = '2026-07-25-user-approved-recover-skzada-v1'"), 'recuperação do SKzada não contém autorização explícita');
+expect(recoveryScript.includes("TARGET_NAME = 'skzada'"), 'recuperação não está limitada ao SKzada');
+expect(recoveryScript.includes('isComplete(backupMatch.application)'), 'recuperação não prioriza registro completo do backup');
+expect(recoveryScript.includes("mode: 'partial-from-discord-log'"), 'fallback parcial não é identificado');
+expect(recoveryScript.includes("reason: 'approved-recovery:player-application-SKzada'"), 'recuperação não publica snapshot específico após concluir');
+for (const forbidden of ['saveUser(', 'saveTeam(', 'deleteTeam(', 'saveTournamentEvent(', 'importDatabaseBackup(']) {
+  expect(!recoveryScript.includes(forbidden), `recuperação do SKzada tenta alterar outro setor: ${forbidden}`);
+}
+
+expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-site-create')"), 'formulário do site não aguarda snapshot imediato');
+expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-discord-create')"), 'formulário do Discord não aguarda snapshot imediato');
+expect(internalApi.includes("flushBackupAfterMutation('player-application-site-create')"), 'API interna não recebeu proteção imediata de formulário');
+expect(playerApplications.includes("flushBackupAfterMutation('player-application-discord-create')"), 'formulário Discord não recebeu proteção imediata');
 
 expect(internalApi.includes("code: 'INTERNAL_TOKEN_NOT_CONFIGURED'"), 'API interna ainda permite acesso quando o token está ausente');
 expect(internalApi.includes("app.get('/public/status'"), 'diagnóstico público seguro do BOT está ausente');
@@ -87,4 +115,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] Backup somente de dados; restauração exata autorizada sem merge; API interna exige ação manual explícita; mensagens automáticas bloqueadas.');
+console.log('[Data Safety Audit] Backup contabiliza formulários; recuperação do SKzada é isolada/deduplicada; novas inscrições aguardam snapshot; demais dados permanecem intocados.');
