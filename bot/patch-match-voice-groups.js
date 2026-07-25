@@ -10,6 +10,6 @@ if (!src.includes('function teamsForVoiceFromBracket')) {
   process.exit(0);
 }
 
-// A lógica de grupos/duplicatas agora fica no patch-match-voice-channels.js.
-// Este arquivo foi mantido no boot apenas para compatibilidade com o start command.
-console.log('Patch aplicado: calls leem grupos e duplicatas de posições do chaveamento.');
+// A leitura de grupos fica no patch principal. A deduplicação final por ID de time
+// é aplicada logo depois por patch-dedupe-match-voice-channels.js.
+console.log('Patch aplicado: calls leem grupos e serão deduplicadas por ID de time.');
