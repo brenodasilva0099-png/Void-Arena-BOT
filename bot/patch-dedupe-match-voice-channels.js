@@ -50,7 +50,7 @@ function stripPrivateVoicePrefix(value = '') {
 }
 
 function escapeVoiceRegex(value = '') {
-  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return String(value || '').replace(/[|\\{}()[\]^$+*?.-]/g, '\\$&');
 }
 
 async function cleanupGeneratedDuplicateTeamVoices(client, teams = [], payload = {}, settings = {}) {
