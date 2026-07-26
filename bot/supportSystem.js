@@ -259,7 +259,7 @@ function supportModal() {
         new TextInputBuilder()
           .setCustomId('page')
           .setLabel('Página ou local')
-          .setPlaceholder('Ex: /pages/times.html ou menu Jogadores')
+          .setPlaceholder('Ex: /pages/clubes.html ou menu Jogadores')
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
           .setMaxLength(300)
