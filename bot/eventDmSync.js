@@ -2,9 +2,22 @@ const dmRefs = new Map();
 const lastSeenEventUpdate = new Map();
 let primed = false;
 
+const CANONICAL_SITE_URL = 'https://hollownexus.com.br';
+
 function clean(value = '') { return String(value || '').trim(); }
-function eventTitle(event = {}) { return event.title || event.name || 'Evento Void Arena'; }
-function eventUrl() { return String(process.env.SITE_PUBLIC_URL || 'https://hollow-nexus-league.onrender.com').replace(/\/$/, '') + '/pages/eventos.html'; }
+function eventTitle(event = {}) { return event.title || event.name || 'Evento Hollow Nexus'; }
+function eventUrl() {
+  const configured = clean(
+    process.env.CANONICAL_SITE_URL ||
+    process.env.SITE_PUBLIC_URL ||
+    process.env.PUBLIC_SITE_URL ||
+    CANONICAL_SITE_URL
+  ).replace(/\/+$/, '');
+  const base = /^https?:\/\//i.test(configured) && !/\.onrender\.com/i.test(configured)
+    ? configured
+    : CANONICAL_SITE_URL;
+  return `${base}/pages/eventos.html`;
+}
 function messageContent(event = {}) {
   const title = eventTitle(event);
   const format = event.matchFormat || 'MD1';
@@ -12,7 +25,7 @@ function messageContent(event = {}) {
   const count = Array.isArray(event.registrations) ? event.registrations.length : 0;
   const start = event.startAt || 'a definir';
   const summary = event.description || 'Evento atualizado pela organização.';
-  return ['🏆 **Atualização de evento na Void Arena**', '', `**${title}** foi atualizado pela organização.`, `Formato: ${format} • Vagas: ${count}/${limit}`, `Início: ${start}`, `Resumo: ${summary}`, '', `Acesse: ${eventUrl()}`, 'Confira a página de Eventos para ver as informações atuais.'].join('\n');
+  return ['🏆 **Atualização de evento na Hollow Nexus League**', '', `**${title}** foi atualizado pela organização.`, `Formato: ${format} • Vagas: ${count}/${limit}`, `Início: ${start}`, `Resumo: ${summary}`, '', `Acesse: ${eventUrl()}`, 'Confira a página de Eventos para ver as informações atuais.'].join('\n');
 }
 function extractDiscordId(value = '') {
   const raw = clean(value);
