@@ -1,5 +1,13 @@
 require('dotenv').config();
 
+const CANONICAL_SITE_URL = 'https://hollownexus.com.br';
+process.env.CANONICAL_SITE_URL = CANONICAL_SITE_URL;
+process.env.PUBLIC_SITE_URL = CANONICAL_SITE_URL;
+process.env.SITE_PUBLIC_URL = CANONICAL_SITE_URL;
+process.env.SITE_URL = CANONICAL_SITE_URL;
+process.env.APP_URL = CANONICAL_SITE_URL;
+process.env.FRONTEND_URL = CANONICAL_SITE_URL;
+
 const { createDiscordClient, startDiscordBot } = require('./discordClient');
 const { startInternalApi } = require('./internalApi');
 const { startEventDmSync } = require('./eventDmSync');
@@ -161,6 +169,7 @@ process.once('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.once('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function boot() {
+  console.log(`[Domain] BOT usando o domínio oficial do SITE: ${CANONICAL_SITE_URL}`);
   ensureInternalApiStarted();
 
   const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
