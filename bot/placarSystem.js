@@ -11,6 +11,7 @@ const {
   TextInputStyle
 } = require('discord.js');
 const placar = require('./placarStorage');
+const { siteUrl } = require('./publicPanelRefresh');
 
 const DEFAULT_PLACAR_CHANNEL_ID = '1522782784987463801';
 const DEFAULT_QUEUE_CHANNEL_ID = '1523063064658972833';
@@ -18,7 +19,7 @@ const RAW_PLACAR_CHANNEL_ID = String(process.env.PLACAR_CHANNEL_ID || DEFAULT_PL
 const QUEUE_CHANNEL_ID = String(process.env.PLACAR_QUEUE_CHANNEL_ID || process.env.CAFE_COM_LEITE_CHANNEL_ID || DEFAULT_QUEUE_CHANNEL_ID).trim();
 const PLACAR_CHANNEL_ID = RAW_PLACAR_CHANNEL_ID && RAW_PLACAR_CHANNEL_ID !== QUEUE_CHANNEL_ID ? RAW_PLACAR_CHANNEL_ID : DEFAULT_PLACAR_CHANNEL_ID;
 const MATCH_CATEGORY_ID = String(process.env.PLACAR_MATCH_CATEGORY_ID || process.env.MATCH_CATEGORY_ID || '').trim();
-const SITE_PLACAR_URL = String(process.env.SITE_PUBLIC_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com/pages/placar.html').trim();
+const SITE_PLACAR_URL = String(process.env.SITE_PLACAR_URL || siteUrl('/pages/placar.html')).trim();
 
 function playerFromMember(member) {
   return {
