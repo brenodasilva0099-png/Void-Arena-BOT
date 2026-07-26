@@ -12,6 +12,7 @@ const {
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { syncResultHubsForBracket } = require('./matchResults');
+const { siteUrl } = require('./publicPanelRefresh');
 
 const backupPathTokenCache = new Map();
 
@@ -392,7 +393,7 @@ function registerControlPanel(client) {
       if (customId === IDS.forms) {
         await interaction.reply({
           ephemeral: true,
-          content: '📋 **Formulários Hollow Nexus**\nSite: https://void-arena-site.onrender.com/pages/formularios.html\nInscrição: https://void-arena-site.onrender.com/pages/inscricao.html\n\nPara criar painel público de inscrição no Discord, use `.inscricao-painel` no canal desejado.'
+          content: ['📋 **Formulários Hollow Nexus League**', `Site: ${siteUrl('/pages/formularios.html')}`, `Inscrição: ${siteUrl('/pages/inscricao.html')}`, '', 'Para criar painel público de inscrição no Discord, use `.inscricao-painel` no canal desejado.'].join('\n')
         });
         return;
       }
@@ -400,7 +401,7 @@ function registerControlPanel(client) {
       if (customId === IDS.training) {
         await interaction.reply({
           ephemeral: true,
-          content: '🎥 **Análise de Partidas**\nSite: https://void-arena-site.onrender.com/pages/treinos.html\n\nPara criar painel público de envio de partida, use `.partidas-painel` no canal desejado.'
+          content: ['🎥 **Análise de Partidas**', `Site: ${siteUrl('/pages/analise-partidas.html')}`, '', 'Para criar painel público de envio de partida, use `.partidas-painel` ou `.treinos-painel` no canal desejado.'].join('\n')
         });
         return;
       }
@@ -415,7 +416,7 @@ function registerControlPanel(client) {
         }
         await interaction.editReply([
           '🏆 **Resultados**',
-          'Site: https://void-arena-site.onrender.com/pages/dashboard.html',
+          `Site: ${siteUrl('/pages/dashboard.html')}`,
           `Canal: <#${process.env.RESULTS_CHANNEL_ID || '1521257495727706234'}>`,
           sync.success ? `HUBs sincronizadas: **${sync.created || 0}/${sync.totalMatches || 0}**.` : `Falha ao sincronizar HUBs: ${sync.message}`,
           '',
