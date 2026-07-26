@@ -15,6 +15,7 @@ const { registerSupportSystem } = require('./supportSystem');
 const { registerMatchResultHandlers } = require('./matchResults');
 const { registerPlacarSystem } = require('./placarSystem');
 const { registerLegalCommands } = require('./legalCommands');
+const { registerPublicPanelRefresh } = require('./publicPanelRefresh');
 const { installRematchAnnouncement } = require('./oneTimeRematchAnnouncement');
 
 installOutboundMessageGuard();
@@ -118,6 +119,7 @@ function registerDiscordHandlers(client) {
   registerMatchResultHandlers(client);
   registerPlacarSystem(client);
   registerLegalCommands(client);
+  registerPublicPanelRefresh(client);
   installRematchAnnouncement(client);
 
   client.once(Events.ClientReady, (readyClient) => {
