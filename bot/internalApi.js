@@ -165,7 +165,7 @@ async function listDiscordChannels(client) {
 }
 
 async function listDiscordMentions(client) {
-  if (!client) return { success: true, members: [], roles: [], memberCount: 0, roleCount: 0, message: 'Bot ainda não inicializou.' };
+  if (!client) return { success: true, members: [], roles: [], memberCount: 0, roleCount: 0, expectedMemberCount: 0, complete: false, message: 'Bot ainda não inicializou.' };
 
   let guilds = [];
   try {
@@ -178,6 +178,7 @@ async function listDiscordMentions(client) {
 
   const membersById = new Map();
   const rolesById = new Map();
+  const guildSummaries = [];
 
   for (const partialGuild of guilds) {
     let guild = partialGuild;
@@ -203,48 +204,84 @@ async function listDiscordMentions(client) {
       console.error('Erro ao buscar cargos:', error.message);
     }
 
-    try {
-      let collection = guild.members?.cache;
-      try {
-        const fetchedMembers = await guild.members.fetch();
-        if (fetchedMembers) collection = fetchedMembers;
-      } catch (error) {
-        console.error('Erro ao buscar todos os membros do servidor:', error.message);
-      }
+    const guildMembers = new Map();
+    const mergeMembers = (collection) => {
+      Array.from(collection?.values?.() || []).forEach((member) => {
+        if (member?.user?.id) guildMembers.set(member.user.id, member);
+      });
+    };
 
-      Array.from(collection?.values?.() || [])
-        .filter((member) => member?.user)
-        .forEach((member) => {
-          const previous = membersById.get(member.user.id) || {};
-          membersById.set(member.user.id, {
-            ...previous,
-            id: member.user.id,
-            discordId: member.user.id,
-            name: member.displayName || member.user.globalName || member.user.username || member.user.id,
-            username: member.user.username || '',
-            guildId: guild.id,
-            guildName: guild.name,
-            avatar: member.user.displayAvatarURL?.({ size: 128 }) || '',
-            mention: '<@' + member.user.id + '>',
-            isBot: Boolean(member.user.bot)
-          });
-        });
+    mergeMembers(guild.members?.cache);
+
+    try {
+      const fetchedMembers = await guild.members.fetch({ withPresences: false });
+      mergeMembers(fetchedMembers);
     } catch (error) {
-      console.error('Erro ao montar catálogo de membros:', error.message);
+      console.error('Erro ao buscar membros pelo gateway:', error.message);
     }
+
+    const expectedCount = Math.max(0, Number(guild.memberCount || 0));
+    if (guildMembers.size < expectedCount && typeof guild.members?.list === 'function') {
+      let after;
+      for (let pageIndex = 0; pageIndex < 10 && guildMembers.size < expectedCount; pageIndex += 1) {
+        try {
+          const page = await guild.members.list({ limit: 1000, ...(after ? { after } : {}) });
+          if (!page?.size) break;
+          mergeMembers(page);
+          const nextAfter = Array.from(page.keys()).at(-1);
+          if (!nextAfter || nextAfter === after || page.size < 1000) break;
+          after = nextAfter;
+        } catch (error) {
+          console.error('Erro ao paginar membros pela API REST:', error.message);
+          break;
+        }
+      }
+    }
+
+    for (const member of guildMembers.values()) {
+      const previous = membersById.get(member.user.id) || {};
+      membersById.set(member.user.id, {
+        ...previous,
+        id: member.user.id,
+        discordId: member.user.id,
+        name: member.displayName || member.user.globalName || member.user.username || member.user.id,
+        username: member.user.username || '',
+        guildId: guild.id,
+        guildName: guild.name,
+        avatar: member.user.displayAvatarURL?.({ size: 128 }) || '',
+        mention: '<@' + member.user.id + '>',
+        isBot: Boolean(member.user.bot)
+      });
+    }
+
+    guildSummaries.push({
+      id: guild.id,
+      name: guild.name,
+      expectedCount,
+      fetchedCount: guildMembers.size,
+      complete: expectedCount === 0 || guildMembers.size >= expectedCount
+    });
   }
 
   const members = Array.from(membersById.values())
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR'));
   const roles = Array.from(rolesById.values());
+  const expectedMemberCount = guildSummaries.reduce((total, guild) => total + guild.expectedCount, 0);
+  const complete = guildSummaries.length > 0 && guildSummaries.every((guild) => guild.complete);
 
   return {
     success: true,
     members,
     roles,
     memberCount: members.length,
+    fetchedMemberCount: members.length,
+    expectedMemberCount,
+    complete,
+    guilds: guildSummaries,
     roleCount: roles.length,
-    message: members.length ? '' : 'Nenhum membro encontrado. Verifique o intent GuildMembers e aguarde o BOT concluir a inicialização.'
+    message: complete
+      ? ''
+      : 'O Discord informou ' + expectedMemberCount + ' membros, mas o BOT carregou ' + members.length + '. Confirme o Server Members Intent no portal do Discord.'
   };
 }
 
