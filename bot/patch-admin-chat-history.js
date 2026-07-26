@@ -32,8 +32,8 @@ source = source.replace(
   "  return { success: true, channels, botUserId: client?.user?.id || '', botTag: client?.user?.tag || '' };\n}"
 );
 
-const sendPattern = /async function sendDiscordMessage\(client, \{ discordChannelId, content, allowedMentions \} = \{\}\) \{[\s\S]*?\n\}\n\nasync function editDiscordMessage/;
-if (!sendPattern.test(source)) throw new Error('[Chat/Admin] Função antiga de envio não encontrada.');
+const sendPattern = /async function sendDiscordMessage\(client, \{ discordChannelId, content, allowedMentions(?:, manual = false)? \} = \{\}\) \{[\s\S]*?\n\}\n\nasync function editDiscordMessage/;
+if (!sendPattern.test(source)) throw new Error('[Chat/Admin] Função de envio não encontrada após os patches anteriores.');
 source = source.replace(sendPattern, `async function sendDiscordMessage(client, { discordChannelId, content, allowedMentions, requestId = '', manual = false } = {}) {
   if (manual !== true) return { success: false, message: 'Envio recusado: esta rota aceita somente ação manual confirmada pelo painel.' };
   if (!discordChannelId || !client?.channels?.fetch) return { success: false, message: 'Bot Discord indisponível ou canal não informado.' };
@@ -44,10 +44,11 @@ source = source.replace(sendPattern, `async function sendDiscordMessage(client, 
   }
   const channel = await client.channels.fetch(discordChannelId);
   if (!channel?.isTextBased?.()) return { success: false, message: 'Canal Discord inválido para envio.' };
-  const sent = await channel.send({
+  const payload = {
     content: String(content || '').slice(0, 2000),
     allowedMentions: allowedMentions || { parse: ['users', 'roles'], repliedUser: false }
-  });
+  };
+  const sent = await channel.send(typeof markManualSend === 'function' ? markManualSend(payload) : payload);
   const result = {
     success: true,
     discordMessageId: sent.id,
@@ -62,8 +63,8 @@ source = source.replace(sendPattern, `async function sendDiscordMessage(client, 
 
 async function editDiscordMessage`);
 
-const editPattern = /async function editDiscordMessage\(client, \{ discordChannelId, discordMessageId, content, allowedMentions \} = \{\}\) \{[\s\S]*?\n\}\n\nasync function importDiscordHistory/;
-if (!editPattern.test(source)) throw new Error('[Chat/Admin] Função antiga de edição não encontrada.');
+const editPattern = /async function editDiscordMessage\(client, \{ discordChannelId, discordMessageId, content, allowedMentions(?:, manual = false)? \} = \{\}\) \{[\s\S]*?\n\}\n\nasync function importDiscordHistory/;
+if (!editPattern.test(source)) throw new Error('[Chat/Admin] Função de edição não encontrada após os patches anteriores.');
 source = source.replace(editPattern, `async function editDiscordMessage(client, { discordChannelId, discordMessageId, content, allowedMentions, requestId = '', manual = false } = {}) {
   if (manual !== true) return { success: false, message: 'Edição recusada: esta rota aceita somente ação manual confirmada pelo painel.' };
   if (!discordChannelId || !discordMessageId || !client?.channels?.fetch) return { success: false, message: 'Bot Discord indisponível ou mensagem não informada.' };
@@ -77,10 +78,11 @@ source = source.replace(editPattern, `async function editDiscordMessage(client, 
   if (!message || message.author?.id !== client.user?.id || !message.editable) {
     return { success: false, message: 'Somente mensagens enviadas pelo próprio BOT podem ser editadas.' };
   }
-  const edited = await message.edit({
+  const payload = {
     content: String(content || '').slice(0, 2000),
     allowedMentions: allowedMentions || { parse: ['users', 'roles'], repliedUser: false }
-  });
+  };
+  const edited = await message.edit(typeof markManualSend === 'function' ? markManualSend(payload) : payload);
   const result = {
     success: true,
     discordMessageId,
