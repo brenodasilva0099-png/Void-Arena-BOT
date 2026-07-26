@@ -12,7 +12,7 @@ const {
 const storage = require('../server/storage');
 
 async function notifySiteRealtime(type, payload = {}) {
-  const siteUrl = String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
+  const siteUrl = String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://hollownexus.com.br').replace(/\/$/, '');
   const token = process.env.SITE_REALTIME_TOKEN || process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
 
   if (!siteUrl || !token) return;
