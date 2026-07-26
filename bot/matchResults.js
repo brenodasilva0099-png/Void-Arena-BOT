@@ -20,7 +20,7 @@ function resultsChannelId(payload = {}) {
 }
 
 function siteUrl() {
-  return String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
+  return String(process.env.SITE_API_URL || process.env.PUBLIC_SITE_URL || 'https://hollownexus.com.br').replace(/\/$/, '');
 }
 
 function siteToken() {
