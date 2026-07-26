@@ -12,6 +12,7 @@ const {
 } = require('discord.js');
 
 const storage = require('../server/storage');
+const { siteUrl } = require('./publicPanelRefresh');
 
 const sessions = new Map();
 
@@ -35,17 +36,22 @@ function sessionKey(interactionOrMessage) {
 
 function panelEmbed() {
   return new EmbedBuilder()
-    .setTitle('📋 Inscrição Hollow Nexus')
+    .setTitle('📋 Inscrição • Hollow Nexus League')
     .setDescription([
-      'Quer participar da seleção? Preencha o formulário em etapas rápidas.',
+      'Quer participar da liga? Escolha uma das opções abaixo para enviar sua inscrição.',
+      '',
+      '1️⃣ **Pelo Discord** — formulário em etapas rápidas aqui no servidor.',
+      '2️⃣ **Pelo navegador** — abre a inscrição direta no site.',
       '',
       '🎮 **Posição e estilo de jogo**',
       '🧠 **Experiência, pontos fortes e pontos fracos**',
       '🕒 **Horários disponíveis**',
-      '✅ A equipe recebe tudo organizado no site.'
+      '',
+      '🌐 **Formulários no site:** ' + siteUrl('/pages/formularios.html'),
+      '🧾 **Inscrição direta:** ' + siteUrl('/pages/inscricao.html')
     ].join('\n'))
     .setColor(0x8b5cf6)
-    .setFooter({ text: 'Void Arena • Formulário oficial Hollow Nexus' });
+    .setFooter({ text: 'HNL • Formulário oficial Hollow Nexus League' });
 }
 
 async function sendPanel(message) {
@@ -55,9 +61,14 @@ async function sendPanel(message) {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('hollowform:start')
-          .setLabel('Preencher inscrição')
+          .setLabel('Preencher pelo Discord')
           .setEmoji('📋')
-          .setStyle(ButtonStyle.Primary)
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setLabel('Abrir no navegador')
+          .setEmoji('🌐')
+          .setURL(siteUrl('/pages/inscricao.html'))
+          .setStyle(ButtonStyle.Link)
       )
     ]
   });
@@ -271,14 +282,14 @@ async function notifyApplicationLog(client, application = {}) {
   await channel.send({
     embeds: [
       {
-        title: '📋 Nova inscrição Hollow Nexus',
+        title: '📋 Nova inscrição Hollow Nexus League',
         color: 0x8b5cf6,
         description:
           `**Jogador:** ${application.userName || application.discordTag || 'Jogador'}\n` +
           `**Posição:** ${application.primaryPosition || '-'} / ${application.secondaryPosition || '-'}\n` +
           `**Estilo:** ${application.playStyle || '-'}\n` +
           `**Origem:** Discord\n\n` +
-          `Abra a página de Formulários no site para analisar a inscrição completa.`,
+          `Abra a página de Formulários no site para analisar a inscrição completa: ${siteUrl('/pages/formularios.html')}`,
         timestamp: new Date().toISOString()
       }
     ]
