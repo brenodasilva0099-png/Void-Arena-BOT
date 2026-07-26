@@ -57,7 +57,7 @@ function eventTitle(event = {}) {
 }
 
 function eventLink() {
-  const siteUrl = String(process.env.PUBLIC_SITE_URL || process.env.SITE_PUBLIC_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
+  const siteUrl = String(process.env.PUBLIC_SITE_URL || process.env.SITE_PUBLIC_URL || 'https://hollownexus.com.br').replace(/\/$/, '');
   return `${siteUrl}/pages/eventos.html`;
 }
 
