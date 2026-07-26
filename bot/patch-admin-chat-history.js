@@ -48,7 +48,7 @@ source = source.replace(sendPattern, `async function sendDiscordMessage(client, 
     content: String(content || '').slice(0, 2000),
     allowedMentions: allowedMentions || { parse: ['users', 'roles'], repliedUser: false }
   };
-  const sent = await channel.send(typeof markManualSend === 'function' ? markManualSend(payload) : payload);
+  const sent = await channel.send(manual === true ? markManualSend(payload) : payload);
   const result = {
     success: true,
     discordMessageId: sent.id,
@@ -82,7 +82,7 @@ source = source.replace(editPattern, `async function editDiscordMessage(client, 
     content: String(content || '').slice(0, 2000),
     allowedMentions: allowedMentions || { parse: ['users', 'roles'], repliedUser: false }
   };
-  const edited = await message.edit(typeof markManualSend === 'function' ? markManualSend(payload) : payload);
+  const edited = await message.edit(manual === true ? markManualSend(payload) : payload);
   const result = {
     success: true,
     discordMessageId,
