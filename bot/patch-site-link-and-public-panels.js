@@ -50,8 +50,8 @@ function patchControlPanel() {
   );
 
   src = src.replace(
-    "content: '🎥 **Análise de Partidas**\nSite: https://void-arena-site.onrender.com/pages/treinos.html\n\nPara criar painel público de envio de partida, use `.partidas-painel` no canal desejado.'",
-    "content: ['🎥 **Análise de Partidas**', `Site: ${siteUrl('/pages/treinos.html')}`, '', 'Para criar painel público de envio de partida, use `.partidas-painel` ou `.treinos-painel` no canal desejado.'].join('\\n')"
+    "content: '🎥 **Análise de Partidas**\nSite: https://void-arena-site.onrender.com/pages/analise-partidas.html\n\nPara criar painel público de envio de partida, use `.partidas-painel` no canal desejado.'",
+    "content: ['🎥 **Análise de Partidas**', `Site: ${siteUrl('/pages/analise-partidas.html')}`, '', 'Para criar painel público de envio de partida, use `.partidas-painel` ou `.treinos-painel` no canal desejado.'].join('\\n')"
   );
 
   src = src.replace(
