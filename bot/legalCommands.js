@@ -1,6 +1,6 @@
 const { EmbedBuilder, Events } = require('discord.js');
 
-const SITE_URL = String(process.env.SITE_PUBLIC_URL || process.env.PUBLIC_SITE_URL || 'https://void-arena-site.onrender.com').replace(/\/$/, '');
+const SITE_URL = String(process.env.SITE_PUBLIC_URL || process.env.PUBLIC_SITE_URL || 'https://hollownexus.com.br').replace(/\/$/, '');
 
 function legalEmbed() {
   return new EmbedBuilder()
