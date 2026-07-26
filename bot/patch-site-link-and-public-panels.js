@@ -3,7 +3,8 @@ const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..');
 const BOT_DIR = __dirname;
-const SITE_URL = 'https://hollow-nexus-league.onrender.com';
+const SITE_URL = 'https://hollownexus.com.br';
+const OLD_SITE_URL_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/gi;
 let changed = false;
 
 function read(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''; }
@@ -151,7 +152,7 @@ function patchPlainOldLinks() {
     let src = read(file);
     if (!src) continue;
     const before = src;
-    src = src.replace(/https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi, SITE_URL);
+    src = src.replace(OLD_SITE_URL_RE, SITE_URL);
     src = src.replace(/Hollow Nexus Tournament/g, 'Hollow Nexus League');
     src = src.replace(/Hollow Nexus FRM/g, 'Hollow Nexus League');
     if (src !== before) write(file, src);
@@ -164,4 +165,4 @@ patchPlayerApplications();
 patchPlacarSystem();
 patchPlainOldLinks();
 
-console.log(changed ? '[Links/Painéis] Bot corrigido para novo site, browser link e refresh de painéis.' : '[Links/Painéis] Bot ja estava corrigido.');
+console.log(changed ? '[Links/Painéis] Domínio oficial aplicado em links e painéis do BOT.' : '[Links/Painéis] Links do BOT já usam o domínio oficial.');
