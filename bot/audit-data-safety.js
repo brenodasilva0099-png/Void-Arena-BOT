@@ -5,7 +5,11 @@ const ROOT = path.join(__dirname, '..');
 const read = (relative) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
 const failures = [];
 const expect = (condition, message) => { if (!condition) failures.push(message); };
-const LEGACY_SITE_URL = ['https://void-arena', 'site.onrender.com'].join('-');
+const CANONICAL_SITE_URL = 'https://hollownexus.com.br';
+const LEGACY_SITE_URLS = [
+  'https://hollow-nexus-league.onrender.com',
+  ['https://void-arena', 'site.onrender.com'].join('-')
+];
 
 const packageJson = JSON.parse(read('package.json'));
 const start = String(packageJson.scripts?.start || '');
@@ -100,8 +104,10 @@ expect(!internalApi.includes('channel.send(markManualSend({'), 'API interna marc
 expect(!internalApi.includes('message.edit(markManualSend({'), 'API interna marca toda edição como manual');
 expect(internalSecurityPatch.includes('manual = false'), 'patch de segurança não preserva modo manual');
 
-expect(eventDmSync.includes('https://hollow-nexus-league.onrender.com'), 'DM de evento usa domínio antigo');
-expect(!eventDmSync.includes(LEGACY_SITE_URL), 'DM de evento contém domínio antigo');
+expect(eventDmSync.includes(CANONICAL_SITE_URL), 'DM de evento não usa o domínio oficial');
+for (const legacy of LEGACY_SITE_URLS) {
+  expect(!eventDmSync.includes(legacy), `DM de evento ainda contém domínio antigo: ${legacy}`);
+}
 expect(linksPatch.includes("!name.startsWith('patch-')") && linksPatch.includes("!name.startsWith('audit-')"), 'patch de links pode alterar auditorias');
 expect(announcement.includes('Envio automático no boot desativado'), 'aviso Rematch pode voltar no boot');
 expect(outboundGuard.includes("'1529298839121428592'") && outboundGuard.includes("'1524621308682436740'"), 'canais protegidos ausentes');
@@ -114,4 +120,4 @@ if (failures.length) {
   throw new Error(`Auditoria de segurança dos dados falhou com ${failures.length} pendência(s).`);
 }
 
-console.log('[Data Safety Audit] União emergencial removida do boot; times usam identidade canônica, duplicatas são consolidadas e logos inválidas são rejeitadas.');
+console.log('[Data Safety Audit] Dados protegidos, domínio oficial aplicado nas DMs e links antigos bloqueados.');
