@@ -7,10 +7,10 @@ const {
   PermissionFlagsBits
 } = require('discord.js');
 
-const DEFAULT_SITE_URL = 'https://hollow-nexus-league.onrender.com';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v5-manual-only';
-const OLD_SITE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/i;
-const OLD_SITE_REPLACE_RE = /https:\/\/void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/gi;
+const DEFAULT_SITE_URL = 'https://hollownexus.com.br';
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v6-custom-domain';
+const OLD_SITE_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/i;
+const OLD_SITE_REPLACE_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/gi;
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
 
 function cleanBaseUrl(value = '') {
@@ -21,7 +21,8 @@ function cleanBaseUrl(value = '') {
 }
 
 function isOldSiteUrl(value = '') {
-  return /void-arena-site(?:-[a-z0-9]+)?\.onrender\.com/i.test(String(value || ''));
+  const raw = String(value || '');
+  return /(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/i.test(raw);
 }
 
 function siteBaseUrl() {
