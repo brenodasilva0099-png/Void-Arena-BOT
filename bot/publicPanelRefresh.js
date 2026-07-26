@@ -8,7 +8,7 @@ const {
 } = require('discord.js');
 
 const DEFAULT_SITE_URL = 'https://hollownexus.com.br';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v6-custom-domain';
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v7-canonical-audit';
 const OLD_SITE_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/i;
 const OLD_SITE_REPLACE_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/gi;
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
@@ -91,7 +91,7 @@ function trainingPayload() {
     .setDescription([
       'Envie vídeos de treino/partidas para análise da equipe.',
       '',
-      `🌐 **Área no site:** ${siteUrl('/pages/treinos.html')}`,
+      `🌐 **Área no site:** ${siteUrl('/pages/analise-partidas.html')}`,
       '',
       'Clique no botão abaixo para abrir o formulário privado no Discord.'
     ].join('\n'))
@@ -149,38 +149,77 @@ function replaceOldText(value = '') {
     });
 }
 
+function replaceOldValues(value) {
+  if (typeof value === 'string') return replaceOldText(value);
+  if (Array.isArray(value)) return value.map(replaceOldValues);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replaceOldValues(item)]));
+}
+
+function messageUsesCurrentPanel(message) {
+  return (message.embeds || []).some((embed) => String(embed.footer?.text || '').includes(REFRESH_MARKER));
+}
+
 async function updateKnownPanel(message, type) {
   if (!message?.editable) return false;
   if (type === 'form') {
+    if (messageUsesCurrentPanel(message)) return false;
     await message.edit(formPayload()).catch(() => null);
     return true;
   }
   if (type === 'training') {
+    if (messageUsesCurrentPanel(message)) return false;
     await message.edit(trainingPayload()).catch(() => null);
     return true;
   }
-  if (type === 'old-link' && message.content) {
-    await message.edit({ content: replaceOldText(message.content) }).catch(() => null);
+  if (type === 'old-link') {
+    const payload = {
+      content: message.content || '',
+      embeds: (message.embeds || []).map((embed) => embed.toJSON?.() || embed),
+      components: (message.components || []).map((row) => row.toJSON?.() || row)
+    };
+    const updated = replaceOldValues(payload);
+    if (JSON.stringify(updated) === JSON.stringify(payload)) return false;
+    await message.edit(updated).catch(() => null);
     return true;
   }
   return false;
 }
 
-async function scanAndRefreshChannel(channel, client) {
+async function fetchRecentMessages(channel, maxMessages = 100) {
+  const target = Math.max(1, Math.min(1000, Number(maxMessages || 100)));
+  const messages = [];
+  let before = '';
+
+  while (messages.length < target) {
+    const limit = Math.min(100, target - messages.length);
+    const page = await channel.messages.fetch({ limit, ...(before ? { before } : {}) }).catch(() => null);
+    const values = Array.from(page?.values?.() || []);
+    if (!values.length) break;
+    messages.push(...values);
+    before = values[values.length - 1]?.id || '';
+    if (values.length < limit || !before) break;
+  }
+
+  return messages;
+}
+
+async function scanAndRefreshChannel(channel, client, options = {}) {
   if (!channel?.messages?.fetch || !channel?.isTextBased?.()) return { checked: 0, updated: 0, deleted: 0 };
-  const messages = await channel.messages.fetch({ limit: 100 }).catch(() => null);
-  const botMessages = Array.from(messages?.values?.() || []).filter((message) => message.author?.id === client.user?.id);
+  const messages = await fetchRecentMessages(channel, options.maxMessages || 100);
+  const botMessages = messages.filter((message) => message.author?.id === client.user?.id);
   let checked = 0;
   let updated = 0;
   let deleted = 0;
   const seenByType = new Set();
+  const removeDuplicates = options.removeDuplicates !== false;
 
   for (const message of botMessages) {
     const type = detectPanel(message);
     if (!type) continue;
     checked += 1;
 
-    if ((type === 'form' || type === 'training') && seenByType.has(type)) {
+    if (removeDuplicates && (type === 'form' || type === 'training') && seenByType.has(type)) {
       await message.delete().catch(() => null);
       deleted += 1;
       continue;
@@ -197,7 +236,8 @@ async function scanAndRefreshChannel(channel, client) {
 async function refreshPublicPanels(client, options = {}) {
   if (!client?.guilds?.cache || !client?.user) return { checked: 0, updated: 0, deleted: 0, channels: 0 };
   const targetChannelIds = new Set(String(options.channelIds || '').split(',').map((item) => item.trim()).filter(Boolean));
-  if (!targetChannelIds.size) {
+  const allGuildChannels = options.allGuildChannels === true;
+  if (!targetChannelIds.size && !allGuildChannels) {
     return { checked: 0, updated: 0, deleted: 0, channels: 0, skipped: true, reason: 'manual_channel_required' };
   }
 
@@ -205,11 +245,11 @@ async function refreshPublicPanels(client, options = {}) {
 
   for (const guild of client.guilds.cache.values()) {
     const channels = Array.from(guild.channels.cache.values()).filter((channel) => (
-      channel?.isTextBased?.() && targetChannelIds.has(channel.id)
+      channel?.isTextBased?.() && (allGuildChannels || targetChannelIds.has(channel.id))
     ));
 
     for (const channel of channels) {
-      const result = await scanAndRefreshChannel(channel, client).catch(() => ({ checked: 0, updated: 0, deleted: 0 }));
+      const result = await scanAndRefreshChannel(channel, client, options).catch(() => ({ checked: 0, updated: 0, deleted: 0 }));
       totals.channels += 1;
       totals.checked += result.checked || 0;
       totals.updated += result.updated || 0;
@@ -225,21 +265,32 @@ function registerPublicPanelRefresh(client) {
   if (!client || client.__hollowPublicPanelRefreshRegistered) return client;
   client.__hollowPublicPanelRefreshRegistered = true;
 
-  // Nenhuma varredura, edição ou publicação acontece no ready/restart.
-  // A rotina só roda após comando explícito de um administrador no próprio canal.
-  console.log('[Painéis] Atualização automática no boot desativada; modo manual ativo.');
+  client.once(Events.ClientReady, (readyClient) => {
+    const timer = setTimeout(() => {
+      refreshPublicPanels(readyClient, {
+        allGuildChannels: true,
+        maxMessages: 300,
+        removeDuplicates: false
+      }).catch((error) => console.error('[Painéis/Auditoria] Falha ao revisar mensagens do BOT:', error.message));
+    }, 12000);
+    timer.unref?.();
+  });
 
   client.on(Events.MessageCreate, async (message) => {
     try {
       if (!message.guild || message.author.bot) return;
       const content = String(message.content || '').trim().toLowerCase();
-      if (!['.paineis-refresh', '.painéis-refresh', '.refresh-paineis', '.refresh-painéis', '.formulario-refresh', '.formulário-refresh', '.inscricao-refresh', '.inscrição-refresh'].includes(content)) return;
+      const [command, scope = ''] = content.split(/\s+/);
+      if (!['.paineis-refresh', '.painéis-refresh', '.refresh-paineis', '.refresh-painéis', '.formulario-refresh', '.formulário-refresh', '.inscricao-refresh', '.inscrição-refresh'].includes(command)) return;
       if (!isStaff(message.member)) {
         await message.reply('❌ Apenas staff/admin pode atualizar os painéis públicos.');
         return;
       }
-      const result = await refreshPublicPanels(client, { channelIds: message.channelId });
-      await message.reply(`✅ Painéis revisados manualmente. Editados: **${result.updated}** • Apagados: **${result.deleted}** • Checados: **${result.checked}**.`);
+      const scanAll = ['all', 'todos', 'servidor'].includes(scope);
+      const result = await refreshPublicPanels(client, scanAll
+        ? { allGuildChannels: true, maxMessages: 500, removeDuplicates: false }
+        : { channelIds: message.channelId, maxMessages: 500 });
+      await message.reply(`✅ Painéis revisados manualmente em **${result.channels}** canal(is). Editados: **${result.updated}** • Apagados: **${result.deleted}** • Checados: **${result.checked}**.`);
     } catch (error) {
       await message.reply(`❌ Erro ao atualizar painéis: ${error.message}`).catch(() => null);
     }
