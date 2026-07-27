@@ -384,7 +384,7 @@ function registerPublicPanelRefresh(client) {
   if (!client || client.__hollowPublicPanelRefreshRegistered) return client;
   client.__hollowPublicPanelRefreshRegistered = true;
 
-  client.once(Events.ClientReady, (readyClient) => {
+  const scheduleAudit = (readyClient) => {
     const timer = setTimeout(() => {
       refreshPublicPanels(readyClient, {
         channelIds: PRIORITY_CHANNEL_IDS.join(','),
@@ -400,7 +400,10 @@ function registerPublicPanelRefresh(client) {
         .catch((error) => console.error('[Painéis/Auditoria] Falha ao revisar mensagens do BOT:', error.message));
     }, 12000);
     timer.unref?.();
-  });
+  };
+
+  if (client.isReady?.()) scheduleAudit(client);
+  else client.once(Events.ClientReady, scheduleAudit);
 
   client.on(Events.MessageCreate, async (message) => {
     try {

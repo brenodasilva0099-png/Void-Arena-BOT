@@ -15,6 +15,8 @@ const { registerSupportSystem } = require('./supportSystem');
 const { registerMatchResultHandlers } = require('./matchResults');
 const { registerPlacarSystem } = require('./placarSystem');
 const { registerLegalCommands } = require('./legalCommands');
+const { registerVoidArenaRoleSystem } = require('./voidArenaRoleSystem');
+const { registerRematchRolePanel } = require('./rematchRolePanel');
 const { registerPublicPanelRefresh } = require('./publicPanelRefresh');
 const { installRematchAnnouncement } = require('./oneTimeRematchAnnouncement');
 
@@ -119,6 +121,8 @@ function registerDiscordHandlers(client) {
   registerMatchResultHandlers(client);
   registerPlacarSystem(client);
   registerLegalCommands(client);
+  registerVoidArenaRoleSystem(client);
+  registerRematchRolePanel(client);
   registerPublicPanelRefresh(client);
   installRematchAnnouncement(client);
 

@@ -8,7 +8,7 @@ process.env.SITE_URL = CANONICAL_SITE_URL;
 process.env.APP_URL = CANONICAL_SITE_URL;
 process.env.FRONTEND_URL = CANONICAL_SITE_URL;
 
-const { createDiscordClient, startDiscordBot } = require('./discordClient');
+const { createDiscordClient, startDiscordBot, registerDiscordHandlers } = require('./discordClient');
 const { startInternalApi } = require('./internalApi');
 const { startEventDmSync } = require('./eventDmSync');
 const { installVoidArenaDirectMessageRoutes } = require('./patch-voidarena-direct-messages');
@@ -21,6 +21,7 @@ installTeamDeletionGuard(storage);
 installAutoMutationBackup(storage, githubBackups);
 
 const client = createDiscordClient();
+registerDiscordHandlers(client);
 const INTERNAL_API_PORT = Number(process.env.BOT_API_PORT || process.env.PORT || 3002);
 const DISCORD_RETRY_DELAYS_MS = [0, 4_000, 10_000, 20_000, 40_000, 60_000];
 
