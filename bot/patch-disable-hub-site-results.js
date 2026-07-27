@@ -39,7 +39,7 @@ async function findExistingHub`,
 );
 
 replaceBlock(
-  /async function submitToSite\(interaction, raw, match\) \{[\s\S]*?\n\}\n\nfunction registerMatchResultHandlers/,
+  /async function submitToSite\(interaction, raw, match\) \{[\s\S]*?\n\}(?=\n\n(?:async function runStoredVoiceDedup|function registerMatchResultHandlers))/,
   `async function submitToSite(interaction) {
   if (!interaction.deferred && !interaction.replied) {
     await interaction.deferReply({ ephemeral: true }).catch(() => null);
@@ -47,9 +47,7 @@ replaceBlock(
   const message = 'O envio de resultados pela HUB para o site foi removido. Registre e valide o resultado somente pelo fluxo atual definido pela administração.';
   if (interaction.deferred || interaction.replied) return interaction.editReply(message).catch(() => null);
   return interaction.reply({ content: message, ephemeral: true }).catch(() => null);
-}
-
-function registerMatchResultHandlers`,
+}`,
   'o envio de resultados ao SITE'
 );
 
