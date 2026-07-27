@@ -19,7 +19,10 @@ const RAW_PLACAR_CHANNEL_ID = String(process.env.PLACAR_CHANNEL_ID || DEFAULT_PL
 const QUEUE_CHANNEL_ID = String(process.env.PLACAR_QUEUE_CHANNEL_ID || process.env.CAFE_COM_LEITE_CHANNEL_ID || DEFAULT_QUEUE_CHANNEL_ID).trim();
 const PLACAR_CHANNEL_ID = RAW_PLACAR_CHANNEL_ID && RAW_PLACAR_CHANNEL_ID !== QUEUE_CHANNEL_ID ? RAW_PLACAR_CHANNEL_ID : DEFAULT_PLACAR_CHANNEL_ID;
 const MATCH_CATEGORY_ID = String(process.env.PLACAR_MATCH_CATEGORY_ID || process.env.MATCH_CATEGORY_ID || '').trim();
-const SITE_PLACAR_URL = String(process.env.SITE_PLACAR_URL || siteUrl('/pages/placar.html')).trim();
+const CONFIGURED_PLACAR_URL = String(process.env.SITE_PLACAR_URL || '').trim();
+const SITE_PLACAR_URL = !CONFIGURED_PLACAR_URL || /(?:^|\.)onrender\.com(?:\/|$)/i.test(CONFIGURED_PLACAR_URL)
+  ? siteUrl('/pages/placar.html')
+  : CONFIGURED_PLACAR_URL;
 
 function playerFromMember(member) {
   return {
