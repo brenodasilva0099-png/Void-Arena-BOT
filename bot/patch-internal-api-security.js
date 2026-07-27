@@ -62,6 +62,20 @@ if (!src.includes("app.get('/public/status'")) {
   }
 }
 
+if (!src.includes('clubRegistryPanelRegistered:')) {
+  replaceOnce(
+    '        publicPanelRefreshRegistered: Boolean(client?.__hollowPublicPanelRefreshRegistered),',
+    '        publicPanelRefreshRegistered: Boolean(client?.__hollowPublicPanelRefreshRegistered),\n        clubRegistryPanelRegistered: Boolean(client?.__hollowClubRegistryRegistered),'
+  );
+}
+
+if (!src.includes('clubRegistryPanel: client?.__hollowClubRegistryStatus')) {
+  replaceOnce(
+    '      discordMessages: getPublicPanelAudit(),',
+    '      discordMessages: getPublicPanelAudit(),\n      clubRegistryPanel: client?.__hollowClubRegistryStatus || null,'
+  );
+}
+
 if (changed) fs.writeFileSync(file, src, 'utf8');
 
 const finalSource = fs.readFileSync(file, 'utf8');
