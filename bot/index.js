@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const CANONICAL_SITE_URL = 'https://hollownexus.com.br';
+const DISCORD_INTERACTION_BUILD = '2026-07-27-discord-interactions-v3';
 process.env.CANONICAL_SITE_URL = CANONICAL_SITE_URL;
 process.env.PUBLIC_SITE_URL = CANONICAL_SITE_URL;
 process.env.SITE_PUBLIC_URL = CANONICAL_SITE_URL;
@@ -171,6 +172,7 @@ process.once('SIGINT', () => gracefulShutdown('SIGINT'));
 
 async function boot() {
   console.log(`[Domain] BOT usando o domínio oficial do SITE: ${CANONICAL_SITE_URL}`);
+  console.log(`[Discord/Interactions] Build ativo: ${DISCORD_INTERACTION_BUILD}`);
   ensureInternalApiStarted();
 
   const status = await storage.readDatabaseStatus().catch((error) => ({ error: error.message }));
