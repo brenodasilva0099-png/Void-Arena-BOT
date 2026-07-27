@@ -230,7 +230,22 @@ async function fetchRecentMessages(channel, maxMessages = 100) {
 
   while (messages.length < target) {
     const limit = Math.min(100, target - messages.length);
-    const page = await channel.messages.fetch({ limit, ...(before ? { before } : {}) }).catch(() => null);
+    let timeout = null;
+    const page = await Promise.race([
+      channel.messages.fetch({ limit, ...(before ? { before } : {}) }),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('Tempo limite ao consultar o histórico do canal.')), 15000);
+        timeout.unref?.();
+      })
+    ])
+      .catch((error) => {
+        console.warn(`[Painéis/Auditoria] Histórico do canal ${channel.id} interrompido:`, error.message);
+        return null;
+      })
+      .finally(() => {
+        if (timeout) clearTimeout(timeout);
+      });
+    if (!page) break;
     const values = Array.from(page?.values?.() || []);
     if (!values.length) break;
     messages.push(...values);
@@ -309,6 +324,15 @@ async function refreshPublicPanels(client, options = {}) {
     staleForeignMessages: 0,
     failures: 0
   };
+  const scope = targetChannelIds.size ? 'priority' : 'all-guild-channels';
+  const startedAt = new Date().toISOString();
+  lastPublicPanelAudit = {
+    status: 'running',
+    startedAt,
+    ranAt: null,
+    scope,
+    ...totals
+  };
 
   for (const guild of client.guilds.cache.values()) {
     const channels = Array.from(guild.channels.cache.values()).filter((channel) => (
@@ -326,12 +350,21 @@ async function refreshPublicPanels(client, options = {}) {
       totals.deleted += result.deleted || 0;
       totals.staleForeignMessages += result.staleForeignMessages || 0;
       totals.failures += result.failures || 0;
+      lastPublicPanelAudit = {
+        status: 'running',
+        startedAt,
+        ranAt: null,
+        scope,
+        ...totals
+      };
     }
   }
 
   lastPublicPanelAudit = {
+    status: 'complete',
+    startedAt,
     ranAt: new Date().toISOString(),
-    scope: targetChannelIds.size ? 'priority' : 'all-guild-channels',
+    scope,
     ...totals
   };
   publicPanelAuditHistory.unshift(lastPublicPanelAudit);
