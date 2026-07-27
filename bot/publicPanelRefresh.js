@@ -19,12 +19,16 @@ const PRIORITY_CHANNEL_IDS = [
   '1524621308682436740',
   '1494883146116890697',
   '1523440429167677511',
-  '1523063064658972833'
+  '1523063064658972833',
+  '1522782784987463801',
+  '1518387894522216559',
+  '1518441859519877120',
+  '1521257495727706234',
+  '1493602223035515082'
 ];
 const OLD_SITE_HOST = '(?:void-arena|void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\\.onrender\\.com';
 const OLD_SITE_RE = new RegExp(`https://${OLD_SITE_HOST}`, 'i');
 const OLD_SITE_REPLACE_RE = new RegExp(`https://${OLD_SITE_HOST}`, 'gi');
-const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
 let lastPublicPanelAudit = {
   ranAt: null,
   checked: 0,
@@ -164,12 +168,7 @@ function detectPanel(message) {
 }
 
 function replaceOldText(value = '') {
-  return String(value || '')
-    .replace(OLD_SITE_REPLACE_RE, siteBaseUrl())
-    .replace(OLD_TITLE_RE, (match) => {
-      if (/Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM/i.test(match)) return 'Hollow Nexus League';
-      return 'Liga';
-    });
+  return String(value || '').replace(OLD_SITE_REPLACE_RE, siteBaseUrl());
 }
 
 function replaceOldValues(value) {
@@ -410,15 +409,36 @@ function registerPublicPanelRefresh(client) {
       if (!message.guild || message.author.bot) return;
       const content = String(message.content || '').trim().toLowerCase();
       const [command, scope = ''] = content.split(/\s+/);
-      if (!['.paineis-refresh', '.painéis-refresh', '.refresh-paineis', '.refresh-painéis', '.formulario-refresh', '.formulário-refresh', '.inscricao-refresh', '.inscrição-refresh'].includes(command)) return;
+      if (![
+        '.paineis-refresh',
+        '.painéis-refresh',
+        '.refresh-paineis',
+        '.refresh-painéis',
+        '.formulario-refresh',
+        '.formulário-refresh',
+        '.inscricao-refresh',
+        '.inscrição-refresh',
+        '.links-refresh',
+        '.link-refresh',
+        '.site-links-refresh'
+      ].includes(command)) return;
       if (!isStaff(message.member)) {
         await message.reply('❌ Apenas staff/admin pode atualizar os painéis públicos.');
         return;
       }
       const scanAll = ['all', 'todos', 'servidor'].includes(scope);
       const result = await refreshPublicPanels(client, scanAll
-        ? { allGuildChannels: true, maxMessages: 500, removeDuplicates: false }
-        : { channelIds: message.channelId, maxMessages: 500 });
+        ? {
+            allGuildChannels: true,
+            maxMessages: command.includes('link') ? 1000 : 500,
+            removeDuplicates: false,
+            authorization: PROTECTED_REPAIR_AUTHORIZATION
+          }
+        : {
+            channelIds: message.channelId,
+            maxMessages: command.includes('link') ? 1000 : 500,
+            authorization: PROTECTED_REPAIR_AUTHORIZATION
+          });
       await message.reply(`✅ Painéis revisados manualmente em **${result.channels}** canal(is). Editados: **${result.updated}** • Apagados: **${result.deleted}** • Checados: **${result.checked}**.`);
     } catch (error) {
       await message.reply(`❌ Erro ao atualizar painéis: ${error.message}`).catch(() => null);
