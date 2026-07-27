@@ -92,19 +92,21 @@ async function ensureVoidArenaRolePanel(client) {
 async function handleClaim(interaction) {
   const guild = interaction.guild;
   if (!guild) return interaction.reply({ content: 'Esse botão só funciona dentro do servidor.', ephemeral: true });
+  await interaction.deferReply({ ephemeral: true });
   const role = await ensureRoleBasePermissions(guild);
-  if (!role) return interaction.reply({ content: 'Não achei o cargo Void Arena configurado no servidor.', ephemeral: true });
+  if (!role) return interaction.editReply({ content: 'Não achei o cargo Void Arena configurado no servidor.' });
   const member = await guild.members.fetch(interaction.user.id).catch(() => interaction.member);
-  if (!member?.roles?.add) return interaction.reply({ content: 'Não consegui carregar seu membro no servidor.', ephemeral: true });
+  if (!member?.roles?.add) return interaction.editReply({ content: 'Não consegui carregar seu membro no servidor.' });
   const alreadyHad = member.roles.cache.has(role.id);
   if (!alreadyHad) await member.roles.add(role, 'Void Arena: cargo resgatado pelo botão do Lobby');
-  await logClaim(interaction.client, member, role, alreadyHad);
-  return interaction.reply({
+  await interaction.editReply({
     content: alreadyHad
       ? `Você já está com o cargo ${role.name}.`
-      : `Cargo ${role.name} equipado. Agora você pode acessar as calls dos eventos quando estiver no time correto.`,
-    ephemeral: true
+      : `Cargo ${role.name} equipado. Agora você pode acessar as calls dos eventos quando estiver no time correto.`
   });
+  logClaim(interaction.client, member, role, alreadyHad)
+    .catch((error) => console.error('Erro ao registrar resgate do cargo Void Arena:', error.message));
+  return null;
 }
 
 function registerVoidArenaRoleSystem(client) {

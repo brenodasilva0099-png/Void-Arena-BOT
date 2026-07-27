@@ -2,6 +2,7 @@ const express = require('express');
 const { Readable } = require('node:stream');
 const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { extractDiscordMessageAttachments } = require('./discordClient');
+const { getPublicPanelAudit } = require('./publicPanelRefresh');
 const storage = require('../server/storage');
 const githubBackups = require('../server/githubBackups');
 const { syncResultHubsForBracket } = require('./matchResults');
@@ -968,7 +969,8 @@ function startInternalApi({ client, port = 3002 } = {}) {
       online: Boolean(client?.user),
       tag: client?.user?.tag || null,
       guilds: client?.guilds?.cache?.size || 0,
-      database
+      database,
+      discordMessages: getPublicPanelAudit()
     });
   });
 

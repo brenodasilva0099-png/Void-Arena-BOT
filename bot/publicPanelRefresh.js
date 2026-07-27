@@ -6,12 +6,35 @@ const {
   Events,
   PermissionFlagsBits
 } = require('discord.js');
+const {
+  isProtectedChannel,
+  markManualSend
+} = require('./outboundMessageGuard');
 
 const DEFAULT_SITE_URL = 'https://hollownexus.com.br';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v7-canonical-audit';
-const OLD_SITE_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/i;
-const OLD_SITE_REPLACE_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/gi;
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v8-interaction-repair';
+const PROTECTED_REPAIR_AUTHORIZATION = '2026-07-27-user-approved-discord-links-and-panels-v1';
+const PRIORITY_CHANNEL_IDS = [
+  '1529298839121428592',
+  '1524621308682436740',
+  '1494883146116890697',
+  '1523440429167677511',
+  '1523063064658972833'
+];
+const OLD_SITE_HOST = '(?:void-arena|void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\\.onrender\\.com';
+const OLD_SITE_RE = new RegExp(`https://${OLD_SITE_HOST}`, 'i');
+const OLD_SITE_REPLACE_RE = new RegExp(`https://${OLD_SITE_HOST}`, 'gi');
 const OLD_TITLE_RE = /Void Arena|Hollow Nexus Tournament|Hollow Nexus FRM|Federa[cç][aã]o/gi;
+let lastPublicPanelAudit = {
+  ranAt: null,
+  checked: 0,
+  updated: 0,
+  deleted: 0,
+  channels: 0,
+  staleForeignMessages: 0,
+  failures: 0
+};
+const publicPanelAuditHistory = [];
 
 function cleanBaseUrl(value = '') {
   const raw = String(value || '').trim().replace(/\/+$/, '');
@@ -22,7 +45,7 @@ function cleanBaseUrl(value = '') {
 
 function isOldSiteUrl(value = '') {
   const raw = String(value || '');
-  return /(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/i.test(raw);
+  return new RegExp(OLD_SITE_HOST, 'i').test(raw);
 }
 
 function siteBaseUrl() {
@@ -160,30 +183,44 @@ function messageUsesCurrentPanel(message) {
   return (message.embeds || []).some((embed) => String(embed.footer?.text || '').includes(REFRESH_MARKER));
 }
 
-async function updateKnownPanel(message, type) {
+function authorizedEditPayload(message, payload, options = {}) {
+  if (
+    isProtectedChannel(message?.channelId) &&
+    options.authorization === PROTECTED_REPAIR_AUTHORIZATION
+  ) {
+    return markManualSend(payload);
+  }
+  return payload;
+}
+
+async function updateKnownPanel(message, type, options = {}) {
   if (!message?.editable) return false;
+  if (
+    isProtectedChannel(message.channelId) &&
+    options.authorization !== PROTECTED_REPAIR_AUTHORIZATION
+  ) return false;
+  let payload = null;
   if (type === 'form') {
     if (messageUsesCurrentPanel(message)) return false;
-    await message.edit(formPayload()).catch(() => null);
-    return true;
-  }
-  if (type === 'training') {
+    payload = formPayload();
+  } else if (type === 'training') {
     if (messageUsesCurrentPanel(message)) return false;
-    await message.edit(trainingPayload()).catch(() => null);
-    return true;
-  }
-  if (type === 'old-link') {
-    const payload = {
+    payload = trainingPayload();
+  } else if (type === 'old-link') {
+    const currentPayload = {
       content: message.content || '',
       embeds: (message.embeds || []).map((embed) => embed.toJSON?.() || embed),
       components: (message.components || []).map((row) => row.toJSON?.() || row)
     };
-    const updated = replaceOldValues(payload);
-    if (JSON.stringify(updated) === JSON.stringify(payload)) return false;
-    await message.edit(updated).catch(() => null);
-    return true;
+    payload = replaceOldValues(currentPayload);
+    if (JSON.stringify(payload) === JSON.stringify(currentPayload)) return false;
   }
-  return false;
+  if (!payload) return false;
+  const edited = await message.edit(authorizedEditPayload(message, payload, options)).catch((error) => {
+    console.error(`[Painéis/Auditoria] Não foi possível editar ${message.id} no canal ${message.channelId}:`, error.message);
+    return null;
+  });
+  return Boolean(edited);
 }
 
 async function fetchRecentMessages(channel, maxMessages = 100) {
@@ -205,12 +242,20 @@ async function fetchRecentMessages(channel, maxMessages = 100) {
 }
 
 async function scanAndRefreshChannel(channel, client, options = {}) {
-  if (!channel?.messages?.fetch || !channel?.isTextBased?.()) return { checked: 0, updated: 0, deleted: 0 };
+  if (!channel?.messages?.fetch || !channel?.isTextBased?.()) {
+    return { checked: 0, updated: 0, deleted: 0, staleForeignMessages: 0, failures: 0 };
+  }
   const messages = await fetchRecentMessages(channel, options.maxMessages || 100);
   const botMessages = messages.filter((message) => message.author?.id === client.user?.id);
+  const staleForeignMessages = messages.filter((message) => (
+    message.author?.bot &&
+    message.author?.id !== client.user?.id &&
+    Boolean(detectPanel(message))
+  )).length;
   let checked = 0;
   let updated = 0;
   let deleted = 0;
+  let failures = 0;
   const seenByType = new Set();
   const removeDuplicates = options.removeDuplicates !== false;
 
@@ -226,22 +271,44 @@ async function scanAndRefreshChannel(channel, client, options = {}) {
     }
 
     if (type === 'form' || type === 'training') seenByType.add(type);
-    const ok = await updateKnownPanel(message, type);
+    const ok = await updateKnownPanel(message, type, options);
     if (ok) updated += 1;
+    else if (
+      type === 'old-link' ||
+      ((type === 'form' || type === 'training') && !messageUsesCurrentPanel(message))
+    ) failures += 1;
   }
 
-  return { checked, updated, deleted };
+  return { checked, updated, deleted, staleForeignMessages, failures };
 }
 
 async function refreshPublicPanels(client, options = {}) {
-  if (!client?.guilds?.cache || !client?.user) return { checked: 0, updated: 0, deleted: 0, channels: 0 };
+  if (!client?.guilds?.cache || !client?.user) {
+    return { checked: 0, updated: 0, deleted: 0, channels: 0, staleForeignMessages: 0, failures: 0 };
+  }
   const targetChannelIds = new Set(String(options.channelIds || '').split(',').map((item) => item.trim()).filter(Boolean));
   const allGuildChannels = options.allGuildChannels === true;
   if (!targetChannelIds.size && !allGuildChannels) {
-    return { checked: 0, updated: 0, deleted: 0, channels: 0, skipped: true, reason: 'manual_channel_required' };
+    return {
+      checked: 0,
+      updated: 0,
+      deleted: 0,
+      channels: 0,
+      staleForeignMessages: 0,
+      failures: 0,
+      skipped: true,
+      reason: 'manual_channel_required'
+    };
   }
 
-  let totals = { checked: 0, updated: 0, deleted: 0, channels: 0 };
+  const totals = {
+    checked: 0,
+    updated: 0,
+    deleted: 0,
+    channels: 0,
+    staleForeignMessages: 0,
+    failures: 0
+  };
 
   for (const guild of client.guilds.cache.values()) {
     const channels = Array.from(guild.channels.cache.values()).filter((channel) => (
@@ -249,16 +316,35 @@ async function refreshPublicPanels(client, options = {}) {
     ));
 
     for (const channel of channels) {
-      const result = await scanAndRefreshChannel(channel, client, options).catch(() => ({ checked: 0, updated: 0, deleted: 0 }));
+      const result = await scanAndRefreshChannel(channel, client, options).catch((error) => {
+        console.error(`[Painéis/Auditoria] Falha no canal ${channel.id}:`, error.message);
+        return { checked: 0, updated: 0, deleted: 0, staleForeignMessages: 0, failures: 1 };
+      });
       totals.channels += 1;
       totals.checked += result.checked || 0;
       totals.updated += result.updated || 0;
       totals.deleted += result.deleted || 0;
+      totals.staleForeignMessages += result.staleForeignMessages || 0;
+      totals.failures += result.failures || 0;
     }
   }
 
-  console.log(`[Painéis/Manual] Refresh concluído: ${totals.updated} editado(s), ${totals.deleted} duplicado(s) apagado(s), ${totals.checked} mensagem(ns) checada(s).`);
+  lastPublicPanelAudit = {
+    ranAt: new Date().toISOString(),
+    scope: targetChannelIds.size ? 'priority' : 'all-guild-channels',
+    ...totals
+  };
+  publicPanelAuditHistory.unshift(lastPublicPanelAudit);
+  if (publicPanelAuditHistory.length > 5) publicPanelAuditHistory.length = 5;
+  console.log(`[Painéis/Auditoria] ${totals.updated} editado(s), ${totals.checked} painel/painéis checado(s), ${totals.staleForeignMessages} painel/painéis antigo(s) de outro BOT e ${totals.failures} falha(s).`);
   return totals;
+}
+
+function getPublicPanelAudit() {
+  return {
+    ...lastPublicPanelAudit,
+    recent: publicPanelAuditHistory.map((audit) => ({ ...audit }))
+  };
 }
 
 function registerPublicPanelRefresh(client) {
@@ -268,10 +354,17 @@ function registerPublicPanelRefresh(client) {
   client.once(Events.ClientReady, (readyClient) => {
     const timer = setTimeout(() => {
       refreshPublicPanels(readyClient, {
-        allGuildChannels: true,
-        maxMessages: 300,
-        removeDuplicates: false
-      }).catch((error) => console.error('[Painéis/Auditoria] Falha ao revisar mensagens do BOT:', error.message));
+        channelIds: PRIORITY_CHANNEL_IDS.join(','),
+        maxMessages: 1000,
+        removeDuplicates: false,
+        authorization: PROTECTED_REPAIR_AUTHORIZATION
+      })
+        .then(() => refreshPublicPanels(readyClient, {
+          allGuildChannels: true,
+          maxMessages: 300,
+          removeDuplicates: false
+        }))
+        .catch((error) => console.error('[Painéis/Auditoria] Falha ao revisar mensagens do BOT:', error.message));
     }, 12000);
     timer.unref?.();
   });
@@ -302,6 +395,7 @@ function registerPublicPanelRefresh(client) {
 module.exports = {
   registerPublicPanelRefresh,
   refreshPublicPanels,
+  getPublicPanelAudit,
   siteBaseUrl,
   siteUrl,
   formPayload,

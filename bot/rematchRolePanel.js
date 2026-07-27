@@ -107,24 +107,30 @@ async function logRoleAction(client, guild, member, action, roleName) {
 
 async function addOrRemoveRole(interaction, role, roleLabel) {
   const member = interaction.member;
-  if (!role) return interaction.reply({ content: '❌ Cargo não encontrado no servidor. Verifique se o cargo existe e se o bot está acima dele na hierarquia.', ephemeral: true });
+  if (!role) return interaction.editReply({ content: '❌ Cargo não encontrado no servidor. Verifique se o cargo existe e se o bot está acima dele na hierarquia.' });
   const hasRole = member.roles.cache.has(role.id);
   if (hasRole) {
     await member.roles.remove(role.id, `Void Arena: devolveu cargo ${roleLabel}`);
-    await logRoleAction(interaction.client, interaction.guild, member, 'removeu', roleLabel);
-    return interaction.reply({ content: `♻️ Cargo removido: **${roleLabel}**.`, ephemeral: true });
+    await interaction.editReply({ content: `♻️ Cargo removido: **${roleLabel}**.` });
+    logRoleAction(interaction.client, interaction.guild, member, 'removeu', roleLabel)
+      .catch((error) => console.error('[rematch-cargos] histórico:', error.message));
+    return null;
   }
   await member.roles.add(role.id, `Void Arena: resgatou cargo ${roleLabel}`);
-  await logRoleAction(interaction.client, interaction.guild, member, 'resgatou', roleLabel);
-  return interaction.reply({ content: `✅ Cargo adicionado: **${roleLabel}**.`, ephemeral: true });
+  await interaction.editReply({ content: `✅ Cargo adicionado: **${roleLabel}**.` });
+  logRoleAction(interaction.client, interaction.guild, member, 'resgatou', roleLabel)
+    .catch((error) => console.error('[rematch-cargos] histórico:', error.message));
+  return null;
 }
 
 async function removeRoles(interaction, roles, label) {
   const ids = roles.map((role) => role?.id).filter((id) => id && interaction.member.roles.cache.has(id));
-  if (!ids.length) return interaction.reply({ content: `Você não está com nenhum cargo de ${label} para devolver.`, ephemeral: true });
+  if (!ids.length) return interaction.editReply({ content: `Você não está com nenhum cargo de ${label} para devolver.` });
   await interaction.member.roles.remove(ids, `Void Arena: devolveu cargos de ${label}`);
-  await logRoleAction(interaction.client, interaction.guild, interaction.member, 'removeu', `cargos de ${label}`);
-  return interaction.reply({ content: `♻️ Cargo(s) de ${label} removido(s).`, ephemeral: true });
+  await interaction.editReply({ content: `♻️ Cargo(s) de ${label} removido(s).` });
+  logRoleAction(interaction.client, interaction.guild, interaction.member, 'removeu', `cargos de ${label}`)
+    .catch((error) => console.error('[rematch-cargos] histórico:', error.message));
+  return null;
 }
 
 function registerRematchRolePanel(client) {
@@ -147,6 +153,7 @@ function registerRematchRolePanel(client) {
     try {
       if (!interaction.isButton?.() || !String(interaction.customId || '').startsWith('rematch-role:')) return;
       if (!interaction.guild || !interaction.member) return interaction.reply({ content: 'Use dentro do servidor.', ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
       const parts = String(interaction.customId).split(':');
       const action = parts[1];
       const value = parts[2];
@@ -170,7 +177,7 @@ function registerRematchRolePanel(client) {
     } catch (error) {
       console.error('[rematch-cargos] interação:', error);
       const payload = { content: `❌ ${error.message}`, ephemeral: true };
-      if (interaction.deferred || interaction.replied) return interaction.followUp(payload).catch(() => null);
+      if (interaction.deferred || interaction.replied) return interaction.editReply({ content: payload.content }).catch(() => null);
       return interaction.reply(payload).catch(() => null);
     }
   });

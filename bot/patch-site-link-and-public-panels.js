@@ -4,7 +4,7 @@ const path = require('node:path');
 const ROOT = path.join(__dirname, '..');
 const BOT_DIR = __dirname;
 const SITE_URL = 'https://hollownexus.com.br';
-const OLD_SITE_URL_RE = /https:\/\/(?:void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/gi;
+const OLD_SITE_URL_RE = /https:\/\/(?:void-arena|void-arena-site(?:-[a-z0-9]+)?|hollow-nexus-league)\.onrender\.com/gi;
 let changed = false;
 
 function read(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : ''; }

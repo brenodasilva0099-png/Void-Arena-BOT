@@ -11,7 +11,7 @@ const ANNOUNCEMENT_PARTS = [
     '',
     '- Todos os jogadores e capitães devem usar o site da Void Arena logando com a própria conta do Discord:',
     '',
-    '🔗 **Site:** https://hollow-nexus-league.onrender.com',
+    '🔗 **Site:** https://hollownexus.com.br',
     '',
     'O login com Discord é importante porque libera mais benefícios e deixa tudo mais fácil de usar, como:',
     '',
