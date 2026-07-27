@@ -204,7 +204,8 @@ function detectPanel(message) {
     ])
   ].join('\n');
 
-  if (/Formul[áa]rio de Inscri[cç][aã]o|Inscri[cç][aã]o\s*(?:•|—|-)?\s*Hollow Nexus|Inscri[cç][aã]o Hollow Nexus|hollowform:start|Formul[áa]rios|Preencher inscri[cç][aã]o|Preencher pelo Discord|Abrir no navegador|Voc[eê] pode preencher pelo Discord/i.test(text)) return 'form';
+  if (/void-arena-support-ticket-panel|Suporte Void Arena|voidsupport:open/i.test(text)) return '';
+  if (/Formul[áa]rio de Inscri[cç][aã]o|Formul[áa]rio oficial\s*(?:•|—|-)?\s*Hollow Nexus|Inscri[cç][aã]o\s*(?:•|—|-)?\s*Hollow Nexus|Inscri[cç][aã]o Hollow Nexus|hollowform:start|HNL\s*•\s*Formul[áa]rios|Central de formul[áa]rios|Preencher inscri[cç][aã]o|Preencher pelo Discord|Abrir no navegador|Voc[eê] pode preencher pelo Discord/i.test(text)) return 'form';
   if (/Central de Treinos|training:open|An[áa]lise de Partidas|Partidas\/Treinos/i.test(text)) return 'training';
   if (OLD_SITE_RE.test(text)) return 'old-link';
   return '';
