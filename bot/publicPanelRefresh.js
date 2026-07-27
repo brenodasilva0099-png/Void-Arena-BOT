@@ -12,9 +12,11 @@ const {
 } = require('./outboundMessageGuard');
 
 const DEFAULT_SITE_URL = 'https://hollownexus.com.br';
-const REFRESH_MARKER = 'hollow-nexus-public-panels-v8-interaction-repair';
+const FORM_PANEL_CHANNEL_ID = String(process.env.FORM_PANEL_CHANNEL_ID || '1518918147439202325').trim();
+const REFRESH_MARKER = 'hollow-nexus-public-panels-v9-dedicated-form-channel';
 const PROTECTED_REPAIR_AUTHORIZATION = '2026-07-27-user-approved-discord-links-and-panels-v1';
 const PRIORITY_CHANNEL_IDS = [
+  '1518918147439202325',
   '1529298839121428592',
   '1524621308682436740',
   '1494883146116890697',
@@ -80,16 +82,17 @@ function isStaff(member) {
 
 function formPayload() {
   const embed = new EmbedBuilder()
-    .setTitle('📋 Inscrição • Hollow Nexus League')
+    .setTitle('📋 Formulário oficial • Hollow Nexus League')
     .setDescription([
-      'Painel oficial para jogadores enviarem inscrição e manterem o cadastro atualizado.',
+      'Use este painel para preencher sua inscrição e manter seus dados atualizados.',
+      'Entre com sua conta do Discord no site para o sistema reconhecer corretamente o seu perfil.',
       '',
-      'Você pode escolher como preencher:',
+      '**Escolha como deseja preencher:**',
       '1️⃣ **Pelo Discord** — abre o formulário em etapas aqui no servidor.',
-      '2️⃣ **Pelo navegador** — abre o formulário direto no site.',
+      '2️⃣ **Pelo site** — abre o formulário oficial no navegador.',
       '',
-      `🌐 **Formulários no site:** ${siteUrl('/pages/formularios.html')}`,
-      `🧾 **Inscrição direta:** ${siteUrl('/pages/inscricao.html')}`
+      `🌐 **Central de formulários:** ${siteUrl('/pages/formularios.html')}`,
+      `🧾 **Abrir inscrição:** ${siteUrl('/pages/inscricao.html')}`
     ].join('\n'))
     .setColor(0x8b5cf6)
     .setFooter({ text: `HNL • Formulários • ${REFRESH_MARKER}` })
@@ -109,6 +112,46 @@ function formPayload() {
         .setURL(siteUrl('/pages/inscricao.html'))
         .setStyle(ButtonStyle.Link)
     )]
+  };
+}
+
+async function ensureFormPanelInChannel(client) {
+  if (!FORM_PANEL_CHANNEL_ID || !client?.channels?.fetch) {
+    return { sent: false, reason: 'no_channel_id' };
+  }
+
+  const channel = await client.channels.fetch(FORM_PANEL_CHANNEL_ID).catch(() => null);
+  if (!channel?.send || !channel?.messages?.fetch) {
+    return { sent: false, reason: 'invalid_channel' };
+  }
+
+  const messages = await fetchRecentMessages(channel, 100);
+  const existing = messages.find((message) => (
+    message.author?.id === client.user?.id &&
+    detectPanel(message) === 'form'
+  ));
+  const payload = formPayload();
+
+  if (existing?.editable) {
+    await existing.edit(payload);
+    await existing.pin?.('Painel oficial de formulários Hollow Nexus League').catch(() => null);
+    console.log(`[Formulários] Painel atualizado no canal ${FORM_PANEL_CHANNEL_ID}.`);
+    return {
+      sent: true,
+      edited: true,
+      channelId: FORM_PANEL_CHANNEL_ID,
+      messageId: existing.id
+    };
+  }
+
+  const message = await channel.send(payload);
+  await message.pin?.('Painel oficial de formulários Hollow Nexus League').catch(() => null);
+  console.log(`[Formulários] Painel publicado no canal ${FORM_PANEL_CHANNEL_ID}.`);
+  return {
+    sent: true,
+    edited: false,
+    channelId: FORM_PANEL_CHANNEL_ID,
+    messageId: message.id
   };
 }
 
@@ -385,12 +428,13 @@ function registerPublicPanelRefresh(client) {
 
   const scheduleAudit = (readyClient) => {
     const timer = setTimeout(() => {
-      refreshPublicPanels(readyClient, {
-        channelIds: PRIORITY_CHANNEL_IDS.join(','),
-        maxMessages: 1000,
-        removeDuplicates: false,
-        authorization: PROTECTED_REPAIR_AUTHORIZATION
-      })
+      ensureFormPanelInChannel(readyClient)
+        .then(() => refreshPublicPanels(readyClient, {
+          channelIds: PRIORITY_CHANNEL_IDS.join(','),
+          maxMessages: 1000,
+          removeDuplicates: false,
+          authorization: PROTECTED_REPAIR_AUTHORIZATION
+        }))
         .then(() => refreshPublicPanels(readyClient, {
           allGuildChannels: true,
           maxMessages: 300,
@@ -454,6 +498,7 @@ module.exports = {
   getPublicPanelAudit,
   siteBaseUrl,
   siteUrl,
+  ensureFormPanelInChannel,
   formPayload,
   trainingPayload
 };
