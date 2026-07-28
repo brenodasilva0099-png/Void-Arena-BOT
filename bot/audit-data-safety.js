@@ -31,6 +31,8 @@ const internalSecurityPatch = read('bot/patch-internal-api-security.js');
 const recoveryPatch = read('bot/patch-player-application-recovery.js');
 const recoveryScript = read('bot/recover-skzada-application.js');
 const backupConfirmationPatch = read('bot/patch-player-application-backup-confirmation.js');
+const discordClient = read('bot/discordClient.js');
+const captainStatsHub = read('bot/captainStatsHub.js');
 
 for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('ensure-nexus-cup-event.js'), `${label} ainda grava/atualiza evento durante deploy`);
@@ -113,6 +115,11 @@ expect(announcement.includes('Envio automático no boot desativado'), 'aviso Rem
 expect(outboundGuard.includes("'1529298839121428592'") && outboundGuard.includes("'1524621308682436740'"), 'canais protegidos ausentes');
 expect(githubBackups.includes("DEFAULT_BACKUP_REPO = 'brenodasilva0099-png/Void-Arena-BACKUPS'"), 'repositório de backup padrão ausente');
 expect(githubBackups.includes('const backup = await storage.exportDatabaseBackup();'), 'GitHub backup não usa exportador do banco');
+expect(discordClient.includes("require('./captainStatsHub')"), 'cliente Discord não importa a HUB de súmulas dos capitães');
+expect(discordClient.includes('registerCaptainStatsHub(client);'), 'cliente Discord não registra a HUB de súmulas dos capitães');
+expect(captainStatsHub.includes("'1516946580425674953'"), 'HUB de súmulas não usa o canal de Estatísticas solicitado');
+expect(captainStatsHub.includes('storage.readTeams()') && captainStatsHub.includes('storage.readUsers()'), 'HUB de súmulas não carrega clubes e jogadores cadastrados');
+expect(captainStatsHub.includes('Nenhum resultado ou ponto será salvo'), 'HUB de teste não deixa explícita a proteção dos dados reais');
 
 if (failures.length) {
   failures.forEach((failure) => console.error(`[Data Safety Audit] ${failure}`));
