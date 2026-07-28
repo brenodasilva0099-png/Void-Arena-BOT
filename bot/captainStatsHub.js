@@ -25,6 +25,11 @@ function clean(value = '', max = 120) {
   return String(value || '').trim().slice(0, max);
 }
 
+function safeAvatarUrl(value = '') {
+  const url = clean(value, 1200);
+  return /^https?:\/\//i.test(url) ? url : '';
+}
+
 function discordIdFrom(value = '') {
   const raw = clean(value, 120);
   if (!raw) return '';
@@ -172,6 +177,11 @@ function rosterItems(team = {}, users = [], type = 'players') {
       discordId: linkedDiscordId,
       userId: clean(linkedUser?.id, 80),
       name: name || displayUser(linkedUser) || `Jogador ${index + 1}`,
+      avatar: safeAvatarUrl(
+        linkedUser?.avatar ||
+        linkedUser?.profile?.avatar ||
+        (typeof detail === 'object' ? detail.avatar : '')
+      ),
       rosterType: type === 'reserves' ? 'Reserva' : 'Titular'
     });
   }
@@ -194,6 +204,31 @@ function rosterLine(item = {}) {
 function rosterField(items = [], empty = 'Nenhum jogador vinculado ao cadastro.') {
   if (!items.length) return empty;
   return items.map(rosterLine).join('\n').slice(0, 1024);
+}
+
+function playerCardEmbed(player = {}, { selected = false, stats = null, pending = false } = {}) {
+  const embed = new EmbedBuilder()
+    .setColor(selected ? 0x22d3ee : 0x312e81)
+    .setAuthor({
+      name: clean(player.name || 'Jogador', 80),
+      ...(player.avatar ? { iconURL: player.avatar } : {})
+    })
+    .setDescription([
+      `${player.rosterType === 'Reserva' ? '🪑 Reserva' : '⚽ Titular'}${player.discordId ? ' · Discord vinculado' : ' · vínculo pendente'}`,
+      player.discordId ? `<@${player.discordId}>` : '',
+      stats
+        ? `${pending ? '⏳ Pendente' : '✅ Preenchido'} · G ${stats.goals || 0} · A ${stats.assists || 0} · I ${stats.interceptions || 0} · D ${stats.defenses || 0}`
+        : (selected ? '✅ Participará da súmula' : 'Clique no seletor abaixo para incluir')
+    ].filter(Boolean).join('\n'));
+  return embed;
+}
+
+function playerCards(players = [], options = {}) {
+  return players.slice(0, 8).map((player) => playerCardEmbed(player, {
+    ...options,
+    stats: typeof options.statsFor === 'function' ? options.statsFor(player) : options.stats,
+    pending: typeof options.pendingFor === 'function' ? options.pendingFor(player) : options.pending
+  }));
 }
 
 function isStaff(member) {
@@ -251,7 +286,7 @@ function panelPayload() {
     .addFields(
       {
         name: 'Como testar',
-        value: 'Clique em **Iniciar súmula de teste**, selecione quem jogou e confira a prévia antes de finalizar.',
+        value: 'Clique em **Iniciar súmula de teste**, escolha os participantes pelos cartões, informe a partida e revise as estatísticas antes de finalizar.',
         inline: false
       },
       {
@@ -312,9 +347,12 @@ function helpEmbed() {
     .setTitle('📖 Como funciona a súmula rápida')
     .setDescription([
       '1. O bot reconhece seu clube pelo login Discord usado no site.',
-      '2. Você seleciona os jogadores que participaram.',
-      '3. Informa adversário, placar, MVP e estatísticas em uma única tela.',
-      '4. O bot mostra uma revisão antes de finalizar.',
+      '2. Você confere os cartões com avatar e seleciona quem participou.',
+      '3. Informa competição, confronto, placar e MVP.',
+      '4. Preenche gols, assistências, interceptações e defesas por jogador.',
+      '5. O bot mostra uma revisão curta antes de finalizar.',
+      '',
+      'Se todos ficaram com zero, o botão **Confirmar zeros restantes** evita preenchimento repetitivo.',
       '',
       'Na versão definitiva, os dois capitães confirmarão o confronto. Divergências irão para a organização.',
       '',
@@ -342,11 +380,13 @@ function teamPickerPayload(teams = [], token, action = 'start') {
 
 function participantPickerPayload(team = {}, users = [], token) {
   const roster = teamRoster(team, users);
+  const starters = roster.filter((item) => item.rosterType === 'Titular');
   const embed = rosterEmbed(team, users)
     .setTitle(`📝 Súmula de teste • ${clean(team.name, 80)}`)
     .setDescription([
-      'Selecione todos os jogadores que participaram desta partida.',
-      'Os titulares já ficam marcados para acelerar o preenchimento.'
+      '**Etapa 1 de 4 — participantes**',
+      'Confira os cartões e selecione quem realmente participou.',
+      'Para ganhar tempo, use **Todos os titulares** quando o time inicial inteiro jogou.'
     ].join('\n'));
   if (!roster.length) {
     embed.addFields({
@@ -367,15 +407,30 @@ function participantPickerPayload(team = {}, users = [], token) {
       description: item.discordId
         ? `${item.rosterType} • Discord vinculado`
         : `${item.rosterType} • vínculo Discord pendente`,
-      value: String(index),
-      default: item.rosterType === 'Titular'
+      value: String(index)
     })));
 
   return {
     roster,
     payload: {
-      embeds: [embed],
-      components: [new ActionRowBuilder().addComponents(menu)]
+      embeds: [
+        embed,
+        ...playerCards(roster),
+        ...(roster.length > 8 ? [new EmbedBuilder()
+          .setColor(0x312e81)
+          .setDescription(`Mais ${roster.length - 8} jogador(es) estão disponíveis no seletor.`)] : [])
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(menu),
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`captain-stats:starters:${token}`)
+            .setLabel(`Todos os titulares (${starters.length})`)
+            .setEmoji('⚽')
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(!starters.length)
+        )
+      ]
     }
   };
 }
@@ -385,15 +440,20 @@ function selectedPlayersPayload(team = {}, selected = [], token) {
     .setColor(0x22d3ee)
     .setTitle('✅ Participantes selecionados')
     .setDescription([
+      '**Etapa 1 de 4 concluída**',
       `**Clube:** ${clean(team.name, 80)}${team.tag ? ` [${clean(team.tag, 16)}]` : ''}`,
       `**Jogadores:** ${selected.length}`,
       '',
-      selected.map(rosterLine).join('\n').slice(0, 2500),
-      '',
-      'Clique em **Continuar** para preencher placar, adversário, MVP e estatísticas.'
+      'Confira os cartões e clique em **Continuar** para informar a partida.'
     ].join('\n'));
   return {
-    embeds: [embed],
+    embeds: [
+      embed,
+      ...playerCards(selected, { selected: true }),
+      ...(selected.length > 8 ? [new EmbedBuilder()
+        .setColor(0x22d3ee)
+        .setDescription(`Mais ${selected.length - 8} jogador(es) também foram selecionados.`)] : [])
+    ],
     components: [
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -411,17 +471,22 @@ function selectedPlayersPayload(team = {}, selected = [], token) {
   };
 }
 
-function statsTemplate(players = []) {
-  return players.map((player) => `${player.name} | G:0 A:0 I:0 D:0`).join('\n').slice(0, 4000);
-}
-
 function matchModal(session = {}, token) {
-  const players = Array.isArray(session.selected) ? session.selected : [];
   const data = session.data || {};
   return new ModalBuilder()
-    .setCustomId(`captain-stats:submit:${token}`)
-    .setTitle('Súmula rápida • teste')
+    .setCustomId(`captain-stats:match-submit:${token}`)
+    .setTitle('Dados da partida • teste')
     .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('competition')
+          .setLabel('Competição / rodada')
+          .setPlaceholder('Ex: Nexus Cup • Rodada 2')
+          .setValue(clean(data.competition, 80))
+          .setRequired(true)
+          .setMaxLength(80)
+          .setStyle(TextInputStyle.Short)
+      ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
           .setCustomId('opponent')
@@ -434,22 +499,22 @@ function matchModal(session = {}, token) {
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('ownScore')
-          .setLabel('Gols do seu time')
-          .setPlaceholder('Ex: 3')
-          .setValue(data.ownScore === undefined ? '' : String(data.ownScore))
+          .setCustomId('score')
+          .setLabel('Placar: seu time x adversário')
+          .setPlaceholder('Ex: 3 x 1')
+          .setValue(data.ownScore === undefined ? '' : `${data.ownScore} x ${data.opponentScore}`)
           .setRequired(true)
-          .setMaxLength(3)
+          .setMaxLength(12)
           .setStyle(TextInputStyle.Short)
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('opponentScore')
-          .setLabel('Gols do adversário')
-          .setPlaceholder('Ex: 1')
-          .setValue(data.opponentScore === undefined ? '' : String(data.opponentScore))
-          .setRequired(true)
-          .setMaxLength(3)
+          .setCustomId('round')
+          .setLabel('Jogo / confronto')
+          .setPlaceholder('Ex: Jogo 1 da MD3, semifinal...')
+          .setValue(clean(data.round, 80))
+          .setRequired(false)
+          .setMaxLength(80)
           .setStyle(TextInputStyle.Short)
       ),
       new ActionRowBuilder().addComponents(
@@ -461,17 +526,150 @@ function matchModal(session = {}, token) {
           .setRequired(false)
           .setMaxLength(80)
           .setStyle(TextInputStyle.Short)
+      )
+    );
+}
+
+function blankPlayerStats() {
+  return {
+    goals: 0,
+    assists: 0,
+    interceptions: 0,
+    defenses: 0,
+    confirmed: false
+  };
+}
+
+function statsFor(session = {}, player = {}) {
+  session.playerStats ||= {};
+  const key = String(player.identity || player.discordId || player.userId || player.name || '');
+  session.playerStats[key] ||= blankPlayerStats();
+  return session.playerStats[key];
+}
+
+function allStatsConfirmed(session = {}) {
+  const players = Array.isArray(session.selected) ? session.selected : [];
+  return Boolean(players.length) && players.every((player) => statsFor(session, player).confirmed);
+}
+
+function playerStatsModal(session = {}, token, index = 0) {
+  const player = session.selected?.[index];
+  const stats = statsFor(session, player || {});
+  return new ModalBuilder()
+    .setCustomId(`captain-stats:player-submit:${token}:${index}`)
+    .setTitle(`Estatísticas • ${clean(player?.name || 'Jogador', 30)}`)
+    .addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('goals')
+          .setLabel('Gols')
+          .setValue(String(stats.goals || 0))
+          .setRequired(true)
+          .setMaxLength(3)
+          .setStyle(TextInputStyle.Short)
       ),
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
-          .setCustomId('stats')
-          .setLabel('Gols, assistências, interceptações e defesas')
-          .setValue(clean(data.stats, 4000) || statsTemplate(players))
+          .setCustomId('assists')
+          .setLabel('Assistências')
+          .setValue(String(stats.assists || 0))
           .setRequired(true)
-          .setMaxLength(4000)
-          .setStyle(TextInputStyle.Paragraph)
+          .setMaxLength(3)
+          .setStyle(TextInputStyle.Short)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('interceptions')
+          .setLabel('Interceptações')
+          .setValue(String(stats.interceptions || 0))
+          .setRequired(true)
+          .setMaxLength(3)
+          .setStyle(TextInputStyle.Short)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('defenses')
+          .setLabel('Defesas')
+          .setValue(String(stats.defenses || 0))
+          .setRequired(true)
+          .setMaxLength(3)
+          .setStyle(TextInputStyle.Short)
       )
     );
+}
+
+function statsDashboardPayload(session = {}, token) {
+  const team = session.team || {};
+  const data = session.data || {};
+  const players = Array.isArray(session.selected) ? session.selected : [];
+  const completed = players.filter((player) => statsFor(session, player).confirmed).length;
+  const embed = new EmbedBuilder()
+    .setColor(completed === players.length ? 0x22c55e : 0x8b5cf6)
+    .setTitle('📊 Estatísticas individuais')
+    .setDescription([
+      '**Etapa 3 de 4 — desempenho dos participantes**',
+      `**Partida:** ${clean(team.name, 80)} ${data.ownScore} × ${data.opponentScore} ${clean(data.opponent, 80)}`,
+      `**Preenchidos:** ${completed}/${players.length}`,
+      '',
+      'Escolha um cartão pelo menu para informar gols, assistências, interceptações e defesas.',
+      'Se ninguém teve estatística individual, use **Confirmar zeros restantes**.'
+    ].join('\n'));
+  const selector = new StringSelectMenuBuilder()
+    .setCustomId(`captain-stats:player-stats:${token}`)
+    .setPlaceholder('Escolha um jogador para preencher')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(players.map((player, index) => {
+      const stats = statsFor(session, player);
+      return {
+        label: clean(player.name, 100),
+        description: stats.confirmed
+          ? `Preenchido • G ${stats.goals} A ${stats.assists} I ${stats.interceptions} D ${stats.defenses}`
+          : 'Pendente • toque para preencher',
+        value: String(index),
+        emoji: stats.confirmed ? '✅' : '⏳'
+      };
+    }));
+  return {
+    embeds: [
+      embed,
+      ...playerCards(players, {
+        selected: true,
+        statsFor: (player) => statsFor(session, player),
+        pendingFor: (player) => !statsFor(session, player).confirmed
+      }),
+      ...(players.length > 8 ? [new EmbedBuilder()
+        .setColor(0x312e81)
+        .setDescription(`Mais ${players.length - 8} jogador(es) estão disponíveis no seletor.`)] : [])
+    ],
+    components: [
+      new ActionRowBuilder().addComponents(selector),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:zero:${token}`)
+          .setLabel('Confirmar zeros restantes')
+          .setEmoji('0️⃣')
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(completed === players.length),
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:review:${token}`)
+          .setLabel('Revisar súmula')
+          .setEmoji('🔎')
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(completed !== players.length),
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:edit-match:${token}`)
+          .setLabel('Editar partida')
+          .setEmoji('✏️')
+          .setStyle(ButtonStyle.Secondary)
+      )
+    ]
+  };
+}
+
+function statLine(player = {}, stats = {}) {
+  const label = player.discordId ? `<@${player.discordId}>` : `**${clean(player.name, 80)}**`;
+  return `${label} — G ${stats.goals || 0} · A ${stats.assists || 0} · I ${stats.interceptions || 0} · D ${stats.defenses || 0}`;
 }
 
 function previewPayload(session = {}, token) {
@@ -482,18 +680,15 @@ function previewPayload(session = {}, token) {
     .setColor(0xf59e0b)
     .setTitle('🧪 Revisão da súmula de teste')
     .setDescription([
-      '**Competição:** futura competição / modo de teste',
+      '**Etapa 4 de 4 — revisão final**',
+      `**Competição:** ${clean(data.competition, 80)}`,
+      `**Confronto:** ${clean(data.round, 80) || 'Não informado'}`,
       `**Partida:** ${clean(team.name, 80)} **${data.ownScore} × ${data.opponentScore}** ${clean(data.opponent, 80)}`,
       `**MVP:** ${clean(data.mvp, 80) || 'Não informado'}`,
       `**Jogadores selecionados:** ${players.length}`,
       '',
-      players.map(rosterLine).join('\n').slice(0, 1300)
+      players.map((player) => statLine(player, statsFor(session, player))).join('\n').slice(0, 3000)
     ].join('\n'))
-    .addFields({
-      name: '📊 Estatísticas informadas',
-      value: `\`\`\`\n${clean(data.stats, 950)}\n\`\`\``,
-      inline: false
-    })
     .setFooter({ text: 'MODO TESTE • Nenhum ponto ou resultado será salvo' });
 
   return {
@@ -501,9 +696,14 @@ function previewPayload(session = {}, token) {
     components: [
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
-          .setCustomId(`captain-stats:edit:${token}`)
-          .setLabel('Corrigir informações')
+          .setCustomId(`captain-stats:edit-match:${token}`)
+          .setLabel('Editar partida')
           .setEmoji('✏️')
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:edit-stats:${token}`)
+          .setLabel('Editar estatísticas')
+          .setEmoji('📊')
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId(`captain-stats:finish:${token}`)
@@ -679,8 +879,24 @@ function registerCaptainStatsHub(client) {
         if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
         const indexes = interaction.values.map(Number).filter(Number.isInteger);
         session.selected = indexes.map((index) => session.roster?.[index]).filter(Boolean);
+        session.playerStats = {};
         if (!session.selected.length) {
           return interaction.reply({ content: 'Selecione pelo menos um jogador.', ephemeral: true });
+        }
+        return interaction.update({
+          ...selectedPlayersPayload(session.team, session.selected, token),
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isButton?.() && id.startsWith('captain-stats:starters:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        session.selected = (session.roster || []).filter((player) => player.rosterType === 'Titular');
+        session.playerStats = {};
+        if (!session.selected.length) {
+          return interaction.reply({ content: '❌ Nenhum titular foi encontrado no cadastro deste clube.', ephemeral: true });
         }
         return interaction.update({
           ...selectedPlayersPayload(session.team, session.selected, token),
@@ -695,12 +911,13 @@ function registerCaptainStatsHub(client) {
         const result = participantPickerPayload(session.team, session.users, token);
         session.roster = result.roster;
         session.selected = [];
+        session.playerStats = {};
         return interaction.update({ ...result.payload, allowedMentions: { parse: [] } });
       }
 
       if (interaction.isButton?.() && (
         id.startsWith('captain-stats:continue:') ||
-        id.startsWith('captain-stats:edit:')
+        id.startsWith('captain-stats:edit-match:')
       )) {
         const token = id.split(':').pop();
         const session = readSession(token, interaction.user.id);
@@ -710,27 +927,100 @@ function registerCaptainStatsHub(client) {
         return interaction.showModal(matchModal(session, token));
       }
 
-      if (interaction.isModalSubmit?.() && id.startsWith('captain-stats:submit:')) {
+      if (interaction.isModalSubmit?.() && id.startsWith('captain-stats:match-submit:')) {
         const token = id.split(':').pop();
         const session = readSession(token, interaction.user.id);
         if (!session?.selected?.length) {
           return interaction.reply({ content: '⏱️ Esta súmula expirou. Inicie novamente.', ephemeral: true });
         }
-        const ownScore = Number(interaction.fields.getTextInputValue('ownScore'));
-        const opponentScore = Number(interaction.fields.getTextInputValue('opponentScore'));
-        if (![ownScore, opponentScore].every((value) => Number.isInteger(value) && value >= 0)) {
-          return interaction.reply({ content: '❌ Informe placares inteiros e positivos.', ephemeral: true });
+        const score = clean(interaction.fields.getTextInputValue('score'), 20).match(/^(\d{1,3})\s*(?:x|×|-)\s*(\d{1,3})$/i);
+        if (!score) {
+          return interaction.reply({ content: '❌ Informe o placar no formato **3 x 1**.', ephemeral: true });
         }
         session.data = {
+          competition: interaction.fields.getTextInputValue('competition'),
           opponent: interaction.fields.getTextInputValue('opponent'),
-          ownScore,
-          opponentScore,
-          mvp: interaction.fields.getTextInputValue('mvp'),
-          stats: interaction.fields.getTextInputValue('stats')
+          ownScore: Number(score[1]),
+          opponentScore: Number(score[2]),
+          round: interaction.fields.getTextInputValue('round'),
+          mvp: interaction.fields.getTextInputValue('mvp')
         };
-        return interaction.reply({
+        session.selected.forEach((player) => statsFor(session, player));
+        const payload = {
+          ...statsDashboardPayload(session, token),
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        };
+        if (interaction.isFromMessage?.()) return interaction.update(payload);
+        return interaction.reply({ ...payload, ephemeral: true });
+      }
+
+      if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:player-stats:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session?.selected?.length) return interaction.reply({ content: '⏱️ Esta súmula expirou. Inicie novamente.', ephemeral: true });
+        const index = Number(interaction.values?.[0]);
+        if (!Number.isInteger(index) || !session.selected[index]) {
+          return interaction.reply({ content: '❌ Jogador não encontrado nesta súmula.', ephemeral: true });
+        }
+        return interaction.showModal(playerStatsModal(session, token, index));
+      }
+
+      if (interaction.isModalSubmit?.() && id.startsWith('captain-stats:player-submit:')) {
+        const [, , token, indexValue] = id.split(':');
+        const session = readSession(token, interaction.user.id);
+        const index = Number(indexValue);
+        const player = session?.selected?.[index];
+        if (!session || !player) return interaction.reply({ content: '⏱️ Esta súmula expirou. Inicie novamente.', ephemeral: true });
+        const fields = ['goals', 'assists', 'interceptions', 'defenses'];
+        const values = Object.fromEntries(fields.map((field) => [field, Number(interaction.fields.getTextInputValue(field))]));
+        if (!fields.every((field) => Number.isInteger(values[field]) && values[field] >= 0 && values[field] <= 999)) {
+          return interaction.reply({ content: '❌ Use apenas números inteiros de 0 a 999 nas estatísticas.', ephemeral: true });
+        }
+        session.playerStats[String(player.identity || player.discordId || player.userId || player.name)] = {
+          ...values,
+          confirmed: true
+        };
+        const payload = {
+          ...statsDashboardPayload(session, token),
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        };
+        if (interaction.isFromMessage?.()) return interaction.update(payload);
+        return interaction.reply({ ...payload, ephemeral: true });
+      }
+
+      if (interaction.isButton?.() && id.startsWith('captain-stats:zero:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session?.selected?.length) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        session.selected.forEach((player) => {
+          const stats = statsFor(session, player);
+          if (!stats.confirmed) stats.confirmed = true;
+        });
+        return interaction.update({
+          ...statsDashboardPayload(session, token),
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isButton?.() && id.startsWith('captain-stats:review:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session?.selected?.length) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        if (!allStatsConfirmed(session)) {
+          return interaction.reply({ content: 'Preencha todos os jogadores ou confirme os zeros restantes antes de revisar.', ephemeral: true });
+        }
+        return interaction.update({
           ...previewPayload(session, token),
-          ephemeral: true,
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isButton?.() && id.startsWith('captain-stats:edit-stats:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session?.selected?.length) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        return interaction.update({
+          ...statsDashboardPayload(session, token),
           allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
         });
       }
@@ -765,6 +1055,10 @@ module.exports = {
   availableTeams,
   panelPayload,
   participantPickerPayload,
+  selectedPlayersPayload,
   matchModal,
+  playerStatsModal,
+  statsDashboardPayload,
+  previewPayload,
   CAPTAIN_STATS_HUB_CHANNEL_ID
 };
