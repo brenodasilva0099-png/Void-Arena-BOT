@@ -19,6 +19,7 @@ const { registerVoidArenaRoleSystem } = require('./voidArenaRoleSystem');
 const { registerRematchRolePanel } = require('./rematchRolePanel');
 const { registerPublicPanelRefresh } = require('./publicPanelRefresh');
 const { registerClubRegistryPanel } = require('./clubRegistryPanel');
+const { registerCaptainStatsHub } = require('./captainStatsHub');
 const { installRematchAnnouncement } = require('./oneTimeRematchAnnouncement');
 
 installOutboundMessageGuard();
@@ -126,6 +127,7 @@ function registerDiscordHandlers(client) {
   registerRematchRolePanel(client);
   registerPublicPanelRefresh(client);
   registerClubRegistryPanel(client);
+  registerCaptainStatsHub(client);
   installRematchAnnouncement(client);
 
   client.once(Events.ClientReady, (readyClient) => {
