@@ -4,6 +4,8 @@ const {
   ButtonStyle,
   EmbedBuilder,
   Events,
+  FileUploadBuilder,
+  LabelBuilder,
   ModalBuilder,
   PermissionFlagsBits,
   StringSelectMenuBuilder,
@@ -272,29 +274,19 @@ function panelPayload() {
     .setColor(0x8b5cf6)
     .setTitle('📊 Central de Súmulas dos Capitães')
     .setDescription([
-      '**Painel de teste para resultados e estatísticas das próximas competições.**',
+      '**Envio guiado de resultados e estatísticas das competições.**',
       '',
-      'O bot reconhece o capitão pela conta do Discord, encontra o clube cadastrado no site e carrega automaticamente titulares e reservas.',
+      'O bot reconhece seu Discord, encontra automaticamente o seu clube e carrega os dados cadastrados no site.',
       '',
-      '**O fluxo definitivo alimentará:**',
-      '• classificação e histórico dos clubes;',
-      '• gols, assistências, interceptações e defesas individuais;',
-      '• MVP e resultado oficial de cada partida.',
+      'Clique no botão abaixo para abrir seu painel privado. A mensagem pública fica limpa e nenhuma informação da súmula aparece para outras pessoas.',
       '',
-      '🧪 **Modo atual:** somente teste. Nenhum resultado ou ponto será salvo.'
+      '🧪 **Modo atual:** teste seguro. Nenhum resultado ou ponto será salvo.'
     ].join('\n'))
-    .addFields(
-      {
-        name: 'Como testar',
-        value: 'Clique em **Iniciar súmula de teste**, escolha os participantes pelos cartões, informe a partida e revise as estatísticas antes de finalizar.',
-        inline: false
-      },
-      {
-        name: 'Cadastro utilizado',
-        value: `[Clubes e elencos do site](${SITE_URL}/pages/clubes.html)`,
-        inline: false
-      }
-    )
+    .addFields({
+      name: 'Dados utilizados',
+      value: `[Clubes e elencos cadastrados no site](${SITE_URL}/pages/clubes.html)`,
+      inline: false
+    })
     .setFooter({ text: HUB_MARKER })
     .setTimestamp(new Date());
 
@@ -304,19 +296,9 @@ function panelPayload() {
       new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('captain-stats:start')
-          .setLabel('Iniciar súmula de teste')
-          .setEmoji('📝')
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId('captain-stats:roster')
-          .setLabel('Conferir meu elenco')
-          .setEmoji('👥')
-          .setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setCustomId('captain-stats:help')
-          .setLabel('Como funciona')
-          .setEmoji('📖')
-          .setStyle(ButtonStyle.Secondary)
+          .setLabel('Abrir painel')
+          .setEmoji('📋')
+          .setStyle(ButtonStyle.Primary)
       )
     ],
     allowedMentions: { parse: [] }
@@ -376,6 +358,236 @@ function teamPickerPayload(teams = [], token, action = 'start') {
       value: String(index)
     })));
   return { embeds: [embed], components: [new ActionRowBuilder().addComponents(menu)] };
+}
+
+const ROUND_OPTIONS = [
+  'Fase de grupos',
+  'Rodada 1',
+  'Rodada 2',
+  'Rodada 3',
+  'Oitavas de final',
+  'Quartas de final',
+  'Semifinal',
+  'Final',
+  'Disputa de 3º lugar',
+  'Amistoso / teste'
+];
+
+function eventStatusLabel(status = '') {
+  return ({
+    open: 'Inscrições abertas',
+    running: 'Em andamento',
+    closed: 'Inscrições encerradas',
+    finished: 'Encerrada'
+  })[String(status || '').toLowerCase()] || 'Competição cadastrada';
+}
+
+function selectedOption(option = {}, selectedValue = '') {
+  return {
+    ...option,
+    default: String(option.value || '') === String(selectedValue || '')
+  };
+}
+
+function participantSummary(players = []) {
+  if (!players.length) return 'Nenhum participante selecionado.';
+  return players.map(rosterLine).join('\n').slice(0, 1024);
+}
+
+function matchSetupPayload(session = {}, token) {
+  const team = session.team || {};
+  const data = session.data ||= {};
+  const roster = Array.isArray(session.roster) ? session.roster : [];
+  const events = Array.isArray(session.events) ? session.events : [];
+  const opponents = (Array.isArray(session.allTeams) ? session.allTeams : [])
+    .filter((candidate) => (
+      candidate?.id &&
+      candidate?.name &&
+      String(candidate.id) !== String(team.id)
+    ))
+    .slice(0, 25);
+
+  const eventOptions = events.slice(0, 24).map((event) => selectedOption({
+    label: clean(event.name || event.title || 'Competição', 100),
+    description: clean(eventStatusLabel(event.status), 100),
+    value: String(event.id)
+  }, data.competitionId));
+  eventOptions.push(selectedOption({
+    label: 'Amistoso / teste',
+    description: 'Súmula sem competição vinculada',
+    value: '__test__'
+  }, data.competitionId));
+
+  const competition = new StringSelectMenuBuilder()
+    .setCustomId(`captain-stats:setup-competition:${token}`)
+    .setPlaceholder('1. Selecione a competição')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(eventOptions);
+  const round = new StringSelectMenuBuilder()
+    .setCustomId(`captain-stats:setup-round:${token}`)
+    .setPlaceholder('2. Selecione a rodada / fase')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(ROUND_OPTIONS.map((label, index) => selectedOption({
+      label,
+      value: String(index)
+    }, data.roundId)));
+  const opponent = new StringSelectMenuBuilder()
+    .setCustomId(`captain-stats:setup-opponent:${token}`)
+    .setPlaceholder('3. Selecione o adversário cadastrado')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(opponents.length ? opponents.map((candidate) => selectedOption({
+      label: clean(candidate.name, 100),
+      description: clean(candidate.tag ? `Tag: ${candidate.tag}` : 'Clube cadastrado no site', 100),
+      value: String(candidate.id)
+    }, data.opponentId)) : [{
+      label: 'Nenhum adversário disponível',
+      value: '__none__',
+      description: 'Cadastre outro clube no site',
+      default: data.opponentId === '__none__'
+    }]);
+  const participants = new StringSelectMenuBuilder()
+    .setCustomId(`captain-stats:setup-players:${token}`)
+    .setPlaceholder('4. Selecione todos que participaram')
+    .setMinValues(1)
+    .setMaxValues(Math.max(1, roster.length))
+    .setDisabled(!roster.length)
+    .addOptions(roster.length ? roster.map((player, index) => ({
+      label: clean(player.name, 100),
+      description: `${player.rosterType}${player.discordId ? ' • Discord vinculado' : ' • vínculo pendente'}`,
+      value: String(index),
+      default: (session.selected || []).some((item) => item.identity === player.identity)
+    })) : [{
+      label: 'Elenco vazio',
+      value: '__none__',
+      description: 'Atualize o elenco no site'
+    }]);
+
+  const ready = Boolean(
+    data.competitionId &&
+    data.round &&
+    data.opponentId &&
+    data.opponentId !== '__none__' &&
+    Array.isArray(session.selected) &&
+    session.selected.length
+  );
+  const embed = new EmbedBuilder()
+    .setColor(ready ? 0x22d3ee : 0x8b5cf6)
+    .setTitle(`📋 Painel da súmula • ${clean(team.name, 80)}`)
+    .setDescription([
+      '**Etapa 1 de 4 — dados guiados**',
+      'Use as listas abaixo. O bot só aceita clubes e jogadores cadastrados, reduzindo erros de digitação.',
+      '',
+      `**Competição:** ${clean(data.competition, 100) || 'Selecione abaixo'}`,
+      `**Rodada/fase:** ${clean(data.round, 100) || 'Selecione abaixo'}`,
+      `**Adversário:** ${clean(data.opponent, 100) || 'Selecione abaixo'}`,
+      `**Participantes do seu time:** ${(session.selected || []).length}/${roster.length}`,
+      '',
+      '**Lista atual**',
+      participantSummary(session.selected || [])
+    ].join('\n'));
+
+  return {
+    embeds: [
+      embed,
+      ...playerCards(session.selected || [], { selected: true })
+    ].slice(0, 10),
+    components: [
+      new ActionRowBuilder().addComponents(competition),
+      new ActionRowBuilder().addComponents(round),
+      new ActionRowBuilder().addComponents(opponent),
+      new ActionRowBuilder().addComponents(participants),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:continue:${token}`)
+          .setLabel('Continuar para MVP e placar')
+          .setEmoji('➡️')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!ready)
+      )
+    ]
+  };
+}
+
+function mvpCandidatesFor(session = {}) {
+  const opponent = (session.allTeams || []).find((team) => (
+    String(team.id || '') === String(session.data?.opponentId || '')
+  ));
+  const players = [
+    ...(session.selected || []),
+    ...teamRoster(opponent || {}, session.users || []).map((player) => ({
+      ...player,
+      opponent: true
+    }))
+  ];
+  const unique = new Map();
+  for (const player of players) {
+    const key = String(player.identity || player.discordId || player.userId || player.name || '');
+    if (key && !unique.has(key)) unique.set(key, player);
+  }
+  return Array.from(unique.values()).slice(0, 25);
+}
+
+function mvpPickerPayload(session = {}, token) {
+  const data = session.data ||= {};
+  const candidates = mvpCandidatesFor(session);
+  session.mvpCandidates = candidates;
+  const embed = new EmbedBuilder()
+    .setColor(data.mvpIdentity ? 0x22d3ee : 0x8b5cf6)
+    .setTitle('⭐ MVP, placar e comprovação')
+    .setDescription([
+      '**Etapa 2 de 4 — confronto**',
+      `**Partida:** ${clean(session.team?.name, 80)} × ${clean(data.opponent, 80)}`,
+      `**Competição:** ${clean(data.competition, 80)} • ${clean(data.round, 80)}`,
+      `**Participantes selecionados:** ${(session.selected || []).length}`,
+      '',
+      'O MVP pode ser de qualquer um dos dois times, inclusive do time derrotado.',
+      'Depois de selecionar, informe o placar e envie a print do fim da partida.'
+    ].join('\n'))
+    .addFields({
+      name: 'Seu time na partida',
+      value: participantSummary(session.selected || []),
+      inline: false
+    });
+  const mvp = new StringSelectMenuBuilder()
+    .setCustomId(`captain-stats:mvp:${token}`)
+    .setPlaceholder('Selecione o MVP entre os dois times')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .setDisabled(!candidates.length)
+    .addOptions(candidates.length ? candidates.map((player, index) => ({
+      label: clean(player.name, 100),
+      description: clean(player.opponent
+        ? `${data.opponent} • adversário`
+        : `${session.team?.name || 'Seu time'} • participante`,
+      100),
+      value: String(index),
+      default: String(player.identity || '') === String(data.mvpIdentity || '')
+    })) : [{
+      label: 'Nenhum jogador disponível',
+      description: 'Revise os elencos cadastrados no site',
+      value: '__none__'
+    }]);
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(mvp),
+      new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:proof:${token}`)
+          .setLabel('Informar placar e enviar print')
+          .setEmoji('📎')
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!data.mvpIdentity),
+        new ButtonBuilder()
+          .setCustomId(`captain-stats:back-setup:${token}`)
+          .setLabel('Voltar e alterar')
+          .setStyle(ButtonStyle.Secondary)
+      )
+    ]
+  };
 }
 
 function participantPickerPayload(team = {}, users = [], token) {
@@ -473,60 +685,41 @@ function selectedPlayersPayload(team = {}, selected = [], token) {
 
 function matchModal(session = {}, token) {
   const data = session.data || {};
+  const score = new TextInputBuilder()
+    .setCustomId('score')
+    .setPlaceholder('Ex: 3 x 1')
+    .setValue(data.ownScore === undefined ? '' : `${data.ownScore} x ${data.opponentScore}`)
+    .setRequired(true)
+    .setMaxLength(12)
+    .setStyle(TextInputStyle.Short);
+  const game = new TextInputBuilder()
+    .setCustomId('game')
+    .setPlaceholder('Ex: Jogo 1 da MD3')
+    .setValue(clean(data.game, 80))
+    .setRequired(false)
+    .setMaxLength(80)
+    .setStyle(TextInputStyle.Short);
+  const proof = new FileUploadBuilder()
+    .setCustomId('proof')
+    .setMinValues(1)
+    .setMaxValues(1);
+
   return new ModalBuilder()
     .setCustomId(`captain-stats:match-submit:${token}`)
-    .setTitle('Dados da partida • teste')
-    .addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('competition')
-          .setLabel('Competição / rodada')
-          .setPlaceholder('Ex: Nexus Cup • Rodada 2')
-          .setValue(clean(data.competition, 80))
-          .setRequired(true)
-          .setMaxLength(80)
-          .setStyle(TextInputStyle.Short)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('opponent')
-          .setLabel('Adversário')
-          .setPlaceholder('Ex: Griffin Gaming')
-          .setValue(clean(data.opponent, 80))
-          .setRequired(true)
-          .setMaxLength(80)
-          .setStyle(TextInputStyle.Short)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('score')
-          .setLabel('Placar: seu time x adversário')
-          .setPlaceholder('Ex: 3 x 1')
-          .setValue(data.ownScore === undefined ? '' : `${data.ownScore} x ${data.opponentScore}`)
-          .setRequired(true)
-          .setMaxLength(12)
-          .setStyle(TextInputStyle.Short)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('round')
-          .setLabel('Jogo / confronto')
-          .setPlaceholder('Ex: Jogo 1 da MD3, semifinal...')
-          .setValue(clean(data.round, 80))
-          .setRequired(false)
-          .setMaxLength(80)
-          .setStyle(TextInputStyle.Short)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('mvp')
-          .setLabel('MVP da partida')
-          .setPlaceholder('Nome de um dos jogadores selecionados')
-          .setValue(clean(data.mvp, 80))
-          .setRequired(false)
-          .setMaxLength(80)
-          .setStyle(TextInputStyle.Short)
-      )
+    .setTitle('Placar e comprovante')
+    .addLabelComponents(
+      new LabelBuilder()
+        .setLabel('Placar: seu time x adversário')
+        .setDescription('Use o formato 3 x 1.')
+        .setTextInputComponent(score),
+      new LabelBuilder()
+        .setLabel('Jogo / confronto')
+        .setDescription('Opcional: identifique o jogo da série.')
+        .setTextInputComponent(game),
+      new LabelBuilder()
+        .setLabel('Print do fim da partida')
+        .setDescription('Envie uma imagem legível para a organização validar o placar.')
+        .setFileUploadComponent(proof)
     );
 }
 
@@ -682,9 +875,10 @@ function previewPayload(session = {}, token) {
     .setDescription([
       '**Etapa 4 de 4 — revisão final**',
       `**Competição:** ${clean(data.competition, 80)}`,
-      `**Confronto:** ${clean(data.round, 80) || 'Não informado'}`,
+      `**Confronto:** ${clean(data.round, 80)}${data.game ? ` • ${clean(data.game, 80)}` : ''}`,
       `**Partida:** ${clean(team.name, 80)} **${data.ownScore} × ${data.opponentScore}** ${clean(data.opponent, 80)}`,
-      `**MVP:** ${clean(data.mvp, 80) || 'Não informado'}`,
+      `**MVP:** ${data.mvpDiscordId ? `<@${data.mvpDiscordId}>` : clean(data.mvp, 80) || 'Não informado'}`,
+      `**Comprovante:** ${data.proof?.url ? `[${clean(data.proof.name || 'Abrir print', 80)}](${data.proof.url})` : 'Não enviado'}`,
       `**Jogadores selecionados:** ${players.length}`,
       '',
       players.map((player) => statLine(player, statsFor(session, player))).join('\n').slice(0, 3000)
@@ -716,13 +910,15 @@ function previewPayload(session = {}, token) {
 }
 
 async function loadHubData() {
-  const [teams, users] = await Promise.all([
+  const [teams, users, events] = await Promise.all([
     storage.readTeams().catch(() => []),
-    storage.readUsers().catch(() => [])
+    storage.readUsers().catch(() => []),
+    storage.readEvents().catch(() => [])
   ]);
   return {
     teams: Array.isArray(teams) ? teams : [],
-    users: Array.isArray(users) ? users : []
+    users: Array.isArray(users) ? users : [],
+    events: Array.isArray(events) ? events : []
   };
 }
 
@@ -752,17 +948,26 @@ async function ensureCaptainStatsHub(client) {
   return { created: true, updated: false, channelId: sent.channelId, messageId: sent.id };
 }
 
-async function startForTeam(interaction, team, users, useUpdate = false) {
-  const token = createSession(interaction.user.id, { team, users });
-  const { roster, payload } = participantPickerPayload(team, users, token);
+async function startForTeam(interaction, team, users, allTeams, events, useUpdate = false) {
+  const roster = teamRoster(team, users);
+  const token = createSession(interaction.user.id, {
+    team,
+    users,
+    allTeams,
+    events,
+    roster,
+    selected: [],
+    data: {},
+    playerStats: {}
+  });
   const session = readSession(token, interaction.user.id);
-  session.roster = roster;
+  const payload = matchSetupPayload(session, token);
   if (useUpdate) return interaction.update({ ...payload, allowedMentions: { parse: [] } });
   return interaction.reply({ ...payload, ephemeral: true, allowedMentions: { parse: [] } });
 }
 
 async function handleInitialAction(interaction, action) {
-  const { teams, users } = await loadHubData();
+  const { teams, users, events } = await loadHubData();
   const allowedTeams = availableTeams(interaction.member, teams, users);
   if (!allowedTeams.length) {
     return interaction.reply({
@@ -775,7 +980,9 @@ async function handleInitialAction(interaction, action) {
     const token = createSession(interaction.user.id, {
       action,
       teams: allowedTeams,
-      users
+      users,
+      allTeams: teams,
+      events
     });
     return interaction.reply({
       ...teamPickerPayload(allowedTeams, token, action),
@@ -792,7 +999,7 @@ async function handleInitialAction(interaction, action) {
       allowedMentions: { users: teamRoster(team, users).map((item) => item.discordId).filter(Boolean) }
     });
   }
-  return startForTeam(interaction, team, users);
+  return startForTeam(interaction, team, users, teams, events);
 }
 
 function registerCaptainStatsHub(client) {
@@ -870,7 +1077,76 @@ function registerCaptainStatsHub(client) {
             allowedMentions: { users: teamRoster(team, session.users).map((item) => item.discordId).filter(Boolean) }
           });
         }
-        return startForTeam(interaction, team, session.users, true);
+        return startForTeam(
+          interaction,
+          team,
+          session.users,
+          session.allTeams || session.teams,
+          session.events || [],
+          true
+        );
+      }
+
+      if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:setup-competition:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        const eventId = String(interaction.values?.[0] || '');
+        const event = (session.events || []).find((item) => String(item.id || '') === eventId);
+        session.data ||= {};
+        session.data.competitionId = eventId;
+        session.data.competition = event
+          ? clean(event.name || event.title, 100)
+          : 'Amistoso / teste';
+        return interaction.update({
+          ...matchSetupPayload(session, token),
+          allowedMentions: { users: (session.selected || []).map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:setup-round:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        const roundId = String(interaction.values?.[0] || '');
+        session.data ||= {};
+        session.data.roundId = roundId;
+        session.data.round = ROUND_OPTIONS[Number(roundId)] || '';
+        return interaction.update({
+          ...matchSetupPayload(session, token),
+          allowedMentions: { users: (session.selected || []).map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:setup-opponent:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        const opponentId = String(interaction.values?.[0] || '');
+        const opponent = (session.allTeams || []).find((team) => String(team.id || '') === opponentId);
+        session.data ||= {};
+        session.data.opponentId = opponentId;
+        session.data.opponent = clean(opponent?.name, 100);
+        session.data.mvp = '';
+        session.data.mvpIdentity = '';
+        session.data.mvpDiscordId = '';
+        return interaction.update({
+          ...matchSetupPayload(session, token),
+          allowedMentions: { users: (session.selected || []).map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:setup-players:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        const indexes = interaction.values.map(Number).filter(Number.isInteger);
+        session.selected = indexes.map((index) => session.roster?.[index]).filter(Boolean);
+        session.playerStats = {};
+        return interaction.update({
+          ...matchSetupPayload(session, token),
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        });
       }
 
       if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:players:')) {
@@ -916,13 +1192,58 @@ function registerCaptainStatsHub(client) {
       }
 
       if (interaction.isButton?.() && (
-        id.startsWith('captain-stats:continue:') ||
+        id.startsWith('captain-stats:continue:')
+      )) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (
+          !session?.selected?.length ||
+          !session.data?.competitionId ||
+          !session.data?.round ||
+          !session.data?.opponentId
+        ) {
+          return interaction.reply({ content: '⏱️ Esta súmula expirou. Inicie novamente.', ephemeral: true });
+        }
+        return interaction.update({
+          ...mvpPickerPayload(session, token),
+          allowedMentions: { users: session.selected.map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isButton?.() && (
+        id.startsWith('captain-stats:back-setup:') ||
         id.startsWith('captain-stats:edit-match:')
       )) {
         const token = id.split(':').pop();
         const session = readSession(token, interaction.user.id);
-        if (!session?.selected?.length) {
-          return interaction.reply({ content: '⏱️ Esta súmula expirou. Inicie novamente.', ephemeral: true });
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        return interaction.update({
+          ...matchSetupPayload(session, token),
+          allowedMentions: { users: (session.selected || []).map((item) => item.discordId).filter(Boolean) }
+        });
+      }
+
+      if (interaction.isStringSelectMenu?.() && id.startsWith('captain-stats:mvp:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
+        const player = (session.mvpCandidates || mvpCandidatesFor(session))[Number(interaction.values?.[0])];
+        if (!player) return interaction.reply({ content: '❌ MVP não encontrado nos dois elencos.', ephemeral: true });
+        session.data ||= {};
+        session.data.mvp = clean(player.name, 80);
+        session.data.mvpIdentity = String(player.identity || '');
+        session.data.mvpDiscordId = clean(player.discordId, 40);
+        return interaction.update({
+          ...mvpPickerPayload(session, token),
+          allowedMentions: { users: [player.discordId, ...(session.selected || []).map((item) => item.discordId)].filter(Boolean) }
+        });
+      }
+
+      if (interaction.isButton?.() && id.startsWith('captain-stats:proof:')) {
+        const token = id.split(':').pop();
+        const session = readSession(token, interaction.user.id);
+        if (!session?.data?.mvpIdentity) {
+          return interaction.reply({ content: '❌ Selecione o MVP antes de informar o placar.', ephemeral: true });
         }
         return interaction.showModal(matchModal(session, token));
       }
@@ -937,13 +1258,30 @@ function registerCaptainStatsHub(client) {
         if (!score) {
           return interaction.reply({ content: '❌ Informe o placar no formato **3 x 1**.', ephemeral: true });
         }
+        const uploadedFiles = interaction.fields.getUploadedFiles('proof', true);
+        const attachment = Array.from(uploadedFiles?.values?.() || [])[0];
+        const contentType = clean(attachment?.contentType, 120);
+        const fileName = clean(attachment?.name, 160);
+        const imageFile = /^image\//i.test(contentType) ||
+          /\.(?:png|jpe?g|webp|gif)$/i.test(fileName) ||
+          /\.(?:png|jpe?g|webp|gif)(?:\?|$)/i.test(String(attachment?.url || ''));
+        if (!attachment?.url || !imageFile) {
+          return interaction.reply({
+            content: '❌ Envie uma **imagem** do fim da partida (PNG, JPG, WEBP ou GIF).',
+            ephemeral: true
+          });
+        }
         session.data = {
-          competition: interaction.fields.getTextInputValue('competition'),
-          opponent: interaction.fields.getTextInputValue('opponent'),
+          ...session.data,
           ownScore: Number(score[1]),
           opponentScore: Number(score[2]),
-          round: interaction.fields.getTextInputValue('round'),
-          mvp: interaction.fields.getTextInputValue('mvp')
+          game: interaction.fields.getTextInputValue('game'),
+          proof: {
+            id: clean(attachment.id, 80),
+            url: clean(attachment.url, 1200),
+            name: fileName || 'comprovante-da-partida',
+            contentType
+          }
         };
         session.selected.forEach((player) => statsFor(session, player));
         const payload = {
@@ -1054,6 +1392,8 @@ module.exports = {
   teamRoster,
   availableTeams,
   panelPayload,
+  matchSetupPayload,
+  mvpPickerPayload,
   participantPickerPayload,
   selectedPlayersPayload,
   matchModal,
