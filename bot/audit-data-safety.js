@@ -25,6 +25,8 @@ const outboundGuard = read('bot/outboundMessageGuard.js');
 const githubBackups = read('server/githubBackups.js');
 const exactRestore = read('bot/restore-latest-exact-if-incomplete.js');
 const teamIdentityPatch = read('bot/patch-storage-team-identity.js');
+const teamDeletionPatch = read('bot/patch-storage-team-deletions.js');
+const requestedClubCleanup = read('bot/apply-requested-club-cleanup.js');
 const teamDedupe = read('bot/dedupe-team-records.js');
 const linksPatch = read('bot/patch-site-link-and-public-panels.js');
 const internalSecurityPatch = read('bot/patch-internal-api-security.js');
@@ -41,13 +43,18 @@ for (const [label, command] of [['start', start], ['dev', dev]]) {
   expect(!command.includes('recover-protected-data-union.js'), `${label} ainda executa a união emergencial em todo boot`);
   expect(command.includes('patch-storage-data-purity.js'), `${label} não aplica fidelidade do banco antes do BOT`);
   expect(command.includes('patch-storage-team-identity.js'), `${label} não protege a identidade canônica dos times`);
+  expect(command.includes('patch-storage-team-deletions.js'), `${label} não protege exclusões de times contra restauração`);
   expect(command.includes('patch-internal-api-security.js'), `${label} não fecha a API interna antes do BOT`);
   expect(command.includes('patch-player-application-recovery.js'), `${label} não instala recuperação identificada de formulário`);
   expect(command.includes('patch-player-application-backup-confirmation.js'), `${label} não instala backup imediato de formulários`);
   expect(command.includes('restore-latest-exact-if-incomplete.js'), `${label} não prepara banco ausente antes do BOT`);
+  expect(command.includes('apply-requested-club-cleanup.js'), `${label} não aplica a limpeza exata autorizada`);
   expect(command.includes('dedupe-team-records.js'), `${label} não consolida duplicatas de time existentes`);
   expect(command.includes('recover-skzada-application.js'), `${label} não executa a recuperação autorizada do SKzada`);
   expect(command.indexOf('patch-storage-team-identity.js') < command.indexOf('restore-latest-exact-if-incomplete.js'), `${label} instala a identidade de time tarde demais`);
+  expect(command.indexOf('patch-storage-team-deletions.js') < command.indexOf('restore-latest-exact-if-incomplete.js'), `${label} instala tombstones tarde demais`);
+  expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('apply-requested-club-cleanup.js'), `${label} limpa os alvos antes da eventual restauração exata`);
+  expect(command.indexOf('apply-requested-club-cleanup.js') < command.indexOf('dedupe-team-records.js'), `${label} deduplica antes da limpeza exata`);
   expect(command.indexOf('restore-latest-exact-if-incomplete.js') < command.indexOf('dedupe-team-records.js'), `${label} deduplica antes de preparar o banco-base`);
   expect(command.indexOf('dedupe-team-records.js') < command.indexOf('recover-skzada-application.js'), `${label} recupera formulário antes de estabilizar times`);
   expect(command.indexOf('recover-skzada-application.js') < command.indexOf('audit-data-safety.js'), `${label} audita antes de concluir as recuperações autorizadas`);
@@ -69,6 +76,10 @@ expect(teamIdentityPatch.includes('leadershipOverlap && (sameName || sameTag)'),
 expect(teamIdentityPatch.includes('id: current.id || team.id'), 'saveTeam não preserva o ID canônico');
 expect(teamIdentityPatch.includes('validStoredTeamImage'), 'saveTeam não rejeita logo inválida');
 expect(storage.includes('function teamsRepresentSameClub'), 'storage final não contém proteção contra duplicação');
+expect(teamDeletionPatch.includes('teamDeletionTombstones'), 'patch de exclusão não grava tombstones');
+expect(storage.includes("error.code = 'TEAM_TOMBSTONED'"), 'storage permite ressuscitar time excluído');
+expect(requestedClubCleanup.includes("THE_CREATOR_ID = 'team_1783131181080_5566b289'"), 'limpeza não está limitada ao The Creator solicitado');
+expect(requestedClubCleanup.includes("PLAYER_USER_ID = '6c727eb4-11c4-4975-b352-79064be4e0f5'"), 'limpeza não está limitada ao jogador solicitado');
 
 expect(teamDedupe.includes("AUTHORIZATION = '2026-07-25-user-approved-team-dedup-v1'"), 'deduplicação não contém autorização explícita');
 expect(teamDedupe.includes('function sameClub'), 'deduplicação não possui identidade semântica');
@@ -120,6 +131,10 @@ expect(discordClient.includes('registerCaptainStatsHub(client);'), 'cliente Disc
 expect(captainStatsHub.includes("'1516946580425674953'"), 'HUB de súmulas não usa o canal de Estatísticas solicitado');
 expect(captainStatsHub.includes('storage.readTeams()') && captainStatsHub.includes('storage.readUsers()'), 'HUB de súmulas não carrega clubes e jogadores cadastrados');
 expect(captainStatsHub.includes('Nenhum resultado ou ponto será salvo'), 'HUB de teste não deixa explícita a proteção dos dados reais');
+expect(captainStatsHub.includes(".setLabel('Abrir painel')"), 'HUB pública não possui o único acesso ao painel privado');
+expect(captainStatsHub.includes("getUploadedFiles('proof', true)"), 'súmula não exige a print de comprovação');
+expect(captainStatsHub.includes('setup-opponent'), 'súmula não usa seleção de adversário cadastrado');
+expect(captainStatsHub.includes('mvpCandidatesFor'), 'súmula não permite MVP dos dois elencos');
 
 if (failures.length) {
   failures.forEach((failure) => console.error(`[Data Safety Audit] ${failure}`));
