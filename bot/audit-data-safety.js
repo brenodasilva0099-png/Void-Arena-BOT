@@ -135,6 +135,12 @@ expect(captainStatsHub.includes(".setLabel('Abrir painel')"), 'HUB pública não
 expect(captainStatsHub.includes("getUploadedFiles('proof', true)"), 'súmula não exige a print de comprovação');
 expect(captainStatsHub.includes('setup-opponent'), 'súmula não usa seleção de adversário cadastrado');
 expect(captainStatsHub.includes('mvpCandidatesFor'), 'súmula não permite MVP dos dois elencos');
+expect(
+  captainStatsHub.includes("id.startsWith('captain-stats:mvp:')")
+    && captainStatsHub.includes('await interaction.deferUpdate();')
+    && captainStatsHub.includes('return interaction.editReply({'),
+  'seleção de MVP não confirma a interação antes de atualizar a etapa'
+);
 
 if (failures.length) {
   failures.forEach((failure) => console.error(`[Data Safety Audit] ${failure}`));
