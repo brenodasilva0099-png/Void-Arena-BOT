@@ -18,7 +18,14 @@ const storage = require('../server/storage');
 const CAPTAIN_STATS_HUB_CHANNEL_ID = String(
   process.env.CAPTAIN_STATS_HUB_CHANNEL_ID || '1516946580425674953'
 ).trim();
-const HUB_MARKER = 'Hollow Nexus League • Central de Súmulas dos Capitães • teste-v1';
+const CAPTAIN_STATS_RESULTS_CHANNEL_ID = String(
+  process.env.CAPTAIN_STATS_RESULTS_CHANNEL_ID || '1518441859519877120'
+).trim();
+const HUB_MARKER = 'Hollow Nexus League • Central de Súmulas dos Capitães • validacao-v2';
+const LEGACY_HUB_MARKERS = new Set([
+  HUB_MARKER,
+  'Hollow Nexus League • Central de Súmulas dos Capitães • teste-v1'
+]);
 const SITE_URL = 'https://hollownexus.com.br';
 const SESSION_TTL_MS = 15 * 60 * 1000;
 const sessions = new Map();
@@ -280,7 +287,7 @@ function panelPayload() {
       '',
       'Clique no botão abaixo para abrir seu painel privado. A mensagem pública fica limpa e nenhuma informação da súmula aparece para outras pessoas.',
       '',
-      '🧪 **Modo atual:** teste seguro. Nenhum resultado ou ponto será salvo.'
+      '✅ **Fluxo atual:** a súmula final será enviada à organização. Rankings e pontos só mudam depois da validação.'
     ].join('\n'))
     .addFields({
       name: 'Dados utilizados',
@@ -338,7 +345,7 @@ function helpEmbed() {
       '',
       'Na versão definitiva, os dois capitães confirmarão o confronto. Divergências irão para a organização.',
       '',
-      '🧪 Neste teste, finalizar apenas demonstra o fluxo e não altera o ranking.'
+      'Ao finalizar, a súmula e a print serão enviadas à organização. O ranking só será alterado após validação.'
     ].join('\n'));
 }
 
@@ -594,7 +601,7 @@ function participantPickerPayload(team = {}, users = [], token) {
   const roster = teamRoster(team, users);
   const starters = roster.filter((item) => item.rosterType === 'Titular');
   const embed = rosterEmbed(team, users)
-    .setTitle(`📝 Súmula de teste • ${clean(team.name, 80)}`)
+    .setTitle(`📝 Nova súmula • ${clean(team.name, 80)}`)
     .setDescription([
       '**Etapa 1 de 4 — participantes**',
       'Confira os cartões e selecione quem realmente participou.',
@@ -871,7 +878,7 @@ function previewPayload(session = {}, token) {
   const players = Array.isArray(session.selected) ? session.selected : [];
   const embed = new EmbedBuilder()
     .setColor(0xf59e0b)
-    .setTitle('🧪 Revisão da súmula de teste')
+    .setTitle('📋 Revisão da súmula')
     .setDescription([
       '**Etapa 4 de 4 — revisão final**',
       `**Competição:** ${clean(data.competition, 80)}`,
@@ -883,7 +890,7 @@ function previewPayload(session = {}, token) {
       '',
       players.map((player) => statLine(player, statsFor(session, player))).join('\n').slice(0, 3000)
     ].join('\n'))
-    .setFooter({ text: 'MODO TESTE • Nenhum ponto ou resultado será salvo' });
+    .setFooter({ text: 'AGUARDANDO ENVIO • A organização validará antes de atualizar o ranking' });
 
   return {
     embeds: [embed],
@@ -901,11 +908,65 @@ function previewPayload(session = {}, token) {
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId(`captain-stats:finish:${token}`)
-          .setLabel('Finalizar teste')
+          .setLabel('Enviar para validação')
           .setEmoji('✅')
           .setStyle(ButtonStyle.Success)
       )
     ]
+  };
+}
+
+function submissionPayload(session = {}, interaction = {}) {
+  const team = session.team || {};
+  const data = session.data || {};
+  const players = Array.isArray(session.selected) ? session.selected : [];
+  const proofUrl = clean(data.proof?.url, 1200);
+  const teamLogo = safeAvatarUrl(team.logo || team.logoUrl || team.image || '');
+  const submitterAvatar = safeAvatarUrl(interaction.user?.displayAvatarURL?.({ size: 128 }) || '');
+  const embed = new EmbedBuilder()
+    .setColor(0x8b5cf6)
+    .setAuthor({
+      name: `Enviada por ${clean(interaction.user?.globalName || interaction.user?.username || 'Capitão', 80)}`,
+      ...(submitterAvatar ? { iconURL: submitterAvatar } : {})
+    })
+    .setTitle('📋 Súmula recebida para validação')
+    .setDescription([
+      `**Competição:** ${clean(data.competition, 100)}`,
+      `**Rodada/fase:** ${clean(data.round, 100)}${data.game ? ` • ${clean(data.game, 80)}` : ''}`,
+      '',
+      `### ${clean(team.name, 80)}  ${data.ownScore} × ${data.opponentScore}  ${clean(data.opponent, 80)}`,
+      '',
+      `**MVP informado:** ${data.mvpDiscordId ? `<@${data.mvpDiscordId}>` : clean(data.mvp, 80) || 'Não informado'}`,
+      `**Responsável pelo envio:** <@${clean(interaction.user?.id, 40)}>`,
+      `**Participantes:** ${players.length}`
+    ].join('\n'))
+    .addFields({
+      name: 'Estatísticas individuais',
+      value: players.length
+        ? players.map((player) => statLine(player, statsFor(session, player))).join('\n').slice(0, 1024)
+        : 'Nenhum jogador selecionado.',
+      inline: false
+    })
+    .setFooter({ text: 'AGUARDANDO VALIDAÇÃO DA ORGANIZAÇÃO • Rankings ainda não foram alterados' })
+    .setTimestamp(new Date());
+  if (teamLogo) embed.setThumbnail(teamLogo);
+  if (proofUrl) embed.setImage(proofUrl);
+
+  const components = [];
+  if (proofUrl) {
+    components.push(new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setLabel('Abrir comprovante')
+        .setEmoji('🖼️')
+        .setStyle(ButtonStyle.Link)
+        .setURL(proofUrl)
+    ));
+  }
+  return {
+    content: '📨 **Nova súmula enviada por um capitão.**',
+    embeds: [embed],
+    components,
+    allowedMentions: { parse: [] }
   };
 }
 
@@ -931,7 +992,7 @@ async function ensureCaptainStatsHub(client) {
   const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
   const hubs = Array.from(messages?.values?.() || []).filter((message) => (
     message.author?.id === client.user?.id &&
-    message.embeds?.some?.((embed) => String(embed.footer?.text || '') === HUB_MARKER)
+    message.embeds?.some?.((embed) => LEGACY_HUB_MARKERS.has(String(embed.footer?.text || '')))
   ));
   const payload = panelPayload();
   const existing = hubs[0];
@@ -1371,12 +1432,28 @@ function registerCaptainStatsHub(client) {
         const token = id.split(':').pop();
         const session = readSession(token, interaction.user.id);
         if (!session) return interaction.update({ content: '⏱️ Esta súmula já expirou.', embeds: [], components: [] });
-        sessions.delete(token);
-        return interaction.update({
-          content: '✅ **Teste concluído.** O clube, o elenco e a prévia foram carregados corretamente. Nenhum resultado ou ponto foi salvo.',
-          embeds: [],
-          components: []
-        });
+        if (session.finalizing) {
+          return interaction.reply({ content: '⏳ Esta súmula já está sendo enviada. Aguarde alguns segundos.', ephemeral: true });
+        }
+        await interaction.deferUpdate();
+        session.finalizing = true;
+        try {
+          const resultsChannel = await client.channels.fetch(CAPTAIN_STATS_RESULTS_CHANNEL_ID).catch(() => null);
+          if (!resultsChannel?.isTextBased?.() || !resultsChannel?.send) {
+            throw new Error(`Canal de resultados inválido ou sem acesso: ${CAPTAIN_STATS_RESULTS_CHANNEL_ID}`);
+          }
+          const sent = await resultsChannel.send(submissionPayload(session, interaction));
+          sessions.delete(token);
+          return interaction.editReply({
+            content: `✅ **Súmula enviada para validação** em <#${resultsChannel.id}>. O ranking continuará inalterado até a organização aprovar o resultado.`,
+            embeds: [],
+            components: [],
+            allowedMentions: { parse: [] }
+          });
+        } catch (error) {
+          session.finalizing = false;
+          throw error;
+        }
       }
     } catch (error) {
       console.error('[Súmulas/Capitães] Interação:', error);
@@ -1404,5 +1481,7 @@ module.exports = {
   playerStatsModal,
   statsDashboardPayload,
   previewPayload,
-  CAPTAIN_STATS_HUB_CHANNEL_ID
+  CAPTAIN_STATS_HUB_CHANNEL_ID,
+  CAPTAIN_STATS_RESULTS_CHANNEL_ID,
+  submissionPayload
 };
