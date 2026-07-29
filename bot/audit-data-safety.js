@@ -130,7 +130,9 @@ expect(discordClient.includes("require('./captainStatsHub')"), 'cliente Discord 
 expect(discordClient.includes('registerCaptainStatsHub(client);'), 'cliente Discord não registra a HUB de súmulas dos capitães');
 expect(captainStatsHub.includes("'1516946580425674953'"), 'HUB de súmulas não usa o canal de Estatísticas solicitado');
 expect(captainStatsHub.includes('storage.readTeams()') && captainStatsHub.includes('storage.readUsers()'), 'HUB de súmulas não carrega clubes e jogadores cadastrados');
-expect(captainStatsHub.includes('Nenhum resultado ou ponto será salvo'), 'HUB de teste não deixa explícita a proteção dos dados reais');
+expect(captainStatsHub.includes("'1518441859519877120'"), 'súmula não usa o canal de resultados solicitado');
+expect(captainStatsHub.includes('submissionPayload') && captainStatsHub.includes('resultsChannel.send'), 'finalização da súmula não envia o cartão de resultado');
+expect(captainStatsHub.includes('AGUARDANDO VALIDAÇÃO DA ORGANIZAÇÃO'), 'súmula não informa que o ranking depende de validação');
 expect(captainStatsHub.includes(".setLabel('Abrir painel')"), 'HUB pública não possui o único acesso ao painel privado');
 expect(captainStatsHub.includes("getUploadedFiles('proof', true)"), 'súmula não exige a print de comprovação');
 expect(captainStatsHub.includes('setup-opponent'), 'súmula não usa seleção de adversário cadastrado');
