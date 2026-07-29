@@ -1229,11 +1229,15 @@ function registerCaptainStatsHub(client) {
         if (!session) return interaction.update({ content: '⏱️ Esta súmula expirou. Inicie novamente.', embeds: [], components: [] });
         const player = (session.mvpCandidates || mvpCandidatesFor(session))[Number(interaction.values?.[0])];
         if (!player) return interaction.reply({ content: '❌ MVP não encontrado nos dois elencos.', ephemeral: true });
+        // Confirma a interação antes de reconstruir a etapa. Sem esse ACK,
+        // o Discord pode encerrar o seletor em 3 segundos mesmo que a
+        // atualização da mensagem ainda esteja sendo processada.
+        await interaction.deferUpdate();
         session.data ||= {};
         session.data.mvp = clean(player.name, 80);
         session.data.mvpIdentity = String(player.identity || '');
         session.data.mvpDiscordId = clean(player.discordId, 40);
-        return interaction.update({
+        return interaction.editReply({
           ...mvpPickerPayload(session, token),
           allowedMentions: { users: [player.discordId, ...(session.selected || []).map((item) => item.discordId)].filter(Boolean) }
         });
