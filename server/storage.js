@@ -150,10 +150,20 @@ function normalizeTournamentEvent(raw = {}) {
     teamLimit,
     minimumTeams: Math.max(2, Math.min(teamLimit, Number(raw.minimumTeams || 4) || 4)),
     startAt: String(raw.startAt || '').trim().slice(0, 40),
-    status: ['open', 'closed', 'running', 'finished'].includes(String(raw.status || '').toLowerCase())
+    status: ['upcoming', 'open', 'closed', 'running', 'finished'].includes(String(raw.status || '').toLowerCase())
       ? String(raw.status).toLowerCase()
       : 'open',
     description: String(raw.description || 'Campeonato principal da comunidade. Inscreva seu time, confira o limite de vagas e envie o comprovante pelo ticket do Discord.').trim().slice(0, 260),
+    reward: String(raw.reward || raw.prize || '').trim().slice(0, 180),
+    prize: String(raw.prize || raw.reward || '').trim().slice(0, 180),
+    entryFee: String(raw.entryFee || raw.registrationFee || '').trim().slice(0, 80),
+    registrationFee: String(raw.registrationFee || raw.entryFee || '').trim().slice(0, 80),
+    isFree: raw.isFree === true
+      || (
+        String(raw.status || '').toLowerCase() !== 'upcoming'
+        && !String(raw.entryFee || raw.registrationFee || '').trim()
+      ),
+    paymentInstructions: String(raw.paymentInstructions || '').trim().slice(0, 420),
     logo: String(raw.logo || raw.thumbnail || '').trim().slice(0, 1200),
     banner: String(raw.banner || '').trim().slice(0, 1200),
     accentColor: String(raw.accentColor || raw.color || '#8b5cf6').trim().slice(0, 24),
@@ -828,6 +838,7 @@ async function createEventRegistrationRequest(payload = {}) {
 
     const event = db.events.find((item) => item.id === safeEventId);
     if (!event) throw new Error('Evento não encontrado.');
+    if (event.status !== 'open') throw new Error('As inscrições desse campeonato não estão abertas.');
 
     const alreadyApproved = event.registrations.find((registration) => (
       registration.teamId === safeTeamId && registration.status !== 'rejected' && registration.status !== 'cancelled'
