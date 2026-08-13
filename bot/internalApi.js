@@ -926,6 +926,29 @@ async function sendSiteMatchReport(client, payload = {}) {
 }
 
 
+async function resolveMatchReportAttachment(client, payload = {}) {
+  const channelId = String(payload.discordChannelId || '').trim();
+  const messageId = String(payload.discordMessageId || '').trim();
+  if (!/^\d{16,22}$/.test(channelId) || !/^\d{16,22}$/.test(messageId)) {
+    throw new Error('Canal ou mensagem do comprovante inválidos.');
+  }
+  const channel = await client?.channels?.fetch?.(channelId).catch(() => null);
+  if (!channel?.messages?.fetch) throw new Error('Canal do comprovante não encontrado.');
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (!message) throw new Error('Mensagem do comprovante não encontrada.');
+  const attachment = message.attachments?.first?.();
+  if (!attachment?.url) throw new Error('A mensagem não possui comprovante anexado.');
+  return {
+    success: true,
+    discordChannelId: channelId,
+    discordMessageId: messageId,
+    proofUrl: attachment.url,
+    contentType: attachment.contentType || '',
+    name: attachment.name || 'comprovante-da-partida'
+  };
+}
+
+
 async function getDiscordMemberRoles(client, discordId = '') {
   const safeDiscordId = String(discordId || '').trim();
   if (!safeDiscordId || !client?.guilds?.cache?.size) {
@@ -1230,6 +1253,14 @@ function startInternalApi({ client, port = 3002 } = {}) {
     }
   });
 
+  app.post('/internal/discord/resolve-match-report-attachment', async (req, res) => {
+    try {
+      return res.json(await resolveMatchReportAttachment(client, req.body || {}));
+    } catch (error) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+  });
+
   app.patch('/internal/discord/edit-message', async (req, res) => {
     try {
       return res.json(await editDiscordMessage(client, req.body || {}));
@@ -1259,6 +1290,7 @@ module.exports = {
   listDiscordMentions,
   sendDiscordMessage,
   sendSiteMatchReport,
+  resolveMatchReportAttachment,
   editDiscordMessage,
   importDiscordHistory
 };
