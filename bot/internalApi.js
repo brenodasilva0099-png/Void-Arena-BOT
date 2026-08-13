@@ -818,7 +818,7 @@ function reportProofAttachment(proof = '', proofMeta = {}) {
   }
   const extension = matched[1].toLowerCase().replace('jpeg', 'jpg');
   const original = reportText(proofMeta?.name || '', 160).replace(/[^\p{L}\p{N}._-]+/gu, '-');
-  const name = (original || \`sumula-\${Date.now()}.\${extension}\`).replace(/\.(?:png|jpe?g|webp)$/i, '') + \`.\${extension}\`;
+  const name = (original || `sumula-${Date.now()}.${extension}`).replace(/\.(?:png|jpe?g|webp)$/i, '') + `.${extension}`;
   return {
     attachment: new AttachmentBuilder(buffer, { name }),
     name
@@ -826,13 +826,13 @@ function reportProofAttachment(proof = '', proofMeta = {}) {
 }
 
 function reportTeam(report = {}, side = 'A') {
-  return report.match?.[\`team\${side}\`] || report[\`team\${side}\`] || {};
+  return report.match?.[`team${side}`] || report[`team${side}`] || {};
 }
 
 function reportPlayerStats(report = {}) {
   return (Array.isArray(report.playerStats) ? report.playerStats : []).slice(0, 18).map((player) => {
     const values = Object.fromEntries(SITE_MATCH_REPORT_STAT_KEYS.map((key) => [key, Math.max(0, Number(player?.[key] || 0))]));
-    return \`• **\${reportText(player.name || 'Jogador', 80)}** — G \${values.goals} · A \${values.assists} · I \${values.interceptions} · D \${values.defenses} · P \${values.passes}\`;
+    return `• **${reportText(player.name || 'Jogador', 80)}** — G ${values.goals} · A ${values.assists} · I ${values.interceptions} · D ${values.defenses} · P ${values.passes}`;
   });
 }
 
@@ -865,20 +865,20 @@ async function sendSiteMatchReport(client, payload = {}) {
   const embed = new EmbedBuilder()
     .setColor(0x7c3aed)
     .setAuthor({ name: 'Hollow Nexus League · Central de Súmulas' })
-    .setTitle(\`\${reportText(teamA.name || 'Time A', 80)} \${scoreA} × \${scoreB} \${reportText(teamB.name || 'Time B', 80)}\`)
+    .setTitle(`${reportText(teamA.name || 'Time A', 80)} ${scoreA} × ${scoreB} ${reportText(teamB.name || 'Time B', 80)}`)
     .setDescription([
-      \`**Competição:** \${reportText(report.competitionName || 'Amistoso / teste', 100)}\`,
-      \`**Fase:** \${reportText(report.round || 'Não informada', 80)}\${report.game ? \` · \${reportText(report.game, 80)}\` : ''}\`,
-      \`**MVP:** \${report.mvp?.discordId ? \`<@\${report.mvp.discordId}>\` : reportText(report.mvp?.name || 'Não informado', 80)}\`,
-      \`**Enviado por:** \${report.submittedBy?.discordId ? \`<@\${report.submittedBy.discordId}>\` : reportText(report.submittedBy?.name || 'Capitão', 80)}\`,
+      `**Competição:** ${reportText(report.competitionName || 'Amistoso / teste', 100)}`,
+      `**Fase:** ${reportText(report.round || 'Não informada', 80)}${report.game ? ` · ${reportText(report.game, 80)}` : ''}`,
+      `**MVP:** ${report.mvp?.discordId ? `<@${report.mvp.discordId}>` : reportText(report.mvp?.name || 'Não informado', 80)}`,
+      `**Enviado por:** ${report.submittedBy?.discordId ? `<@${report.submittedBy.discordId}>` : reportText(report.submittedBy?.name || 'Capitão', 80)}`,
       '',
       '⏳ **Aguardando validação da organização.** O ranking ainda não foi alterado.'
     ].join('\n'))
     .addFields(
       {
-        name: \`Participantes · \${participants.length}\`,
+        name: `Participantes · ${participants.length}`,
         value: participantNames.length
-          ? participantNames.map((name) => \`• \${name}\`).join('\n').slice(0, 1024) + (additionalParticipants ? \`\n• +\${additionalParticipants} jogador(es)\` : '')
+          ? participantNames.map((name) => `• ${name}`).join('\n').slice(0, 1024) + (additionalParticipants ? `\n• +${additionalParticipants} jogador(es)` : '')
           : 'Nenhum participante informado.',
         inline: true
       },
@@ -893,8 +893,8 @@ async function sendSiteMatchReport(client, payload = {}) {
         inline: false
       }
     )
-    .setImage(\`attachment://\${name}\`)
-    .setFooter({ text: \`Súmula \${reportText(report.id || report.hubId || 'site', 90)} · enviada pelo site\` })
+    .setImage(`attachment://${name}`)
+    .setFooter({ text: `Súmula ${reportText(report.id || report.hubId || 'site', 90)} · enviada pelo site` })
     .setTimestamp(new Date(report.createdAt || Date.now()));
 
   if (report.notes) embed.addFields({
