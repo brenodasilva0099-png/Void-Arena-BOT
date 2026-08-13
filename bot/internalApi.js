@@ -11,7 +11,7 @@ const {
   saveChatMessage
 } = storage;
 
-const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
+const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || process.env.SITE_REALTIME_TOKEN || '';
 
 let maintenanceState = {
   enabled: false,
@@ -803,6 +803,35 @@ const SITE_MATCH_REPORT_CHANNEL_ID = String(
 ).trim();
 const SITE_MATCH_REPORT_MAX_BYTES = 8 * 1024 * 1024;
 const SITE_MATCH_REPORT_STAT_KEYS = ['goals', 'assists', 'interceptions', 'defenses', 'passes'];
+const siteMatchReportRequests = new Map();
+
+function rememberSiteMatchReport(key, value) {
+  if (!key) return value;
+  siteMatchReportRequests.set(key, value);
+  while (siteMatchReportRequests.size > 300) siteMatchReportRequests.delete(siteMatchReportRequests.keys().next().value);
+  return value;
+}
+
+async function waitForDiscordReady(client, timeoutMs = 20000) {
+  if (client?.isReady?.()) return true;
+  if (!client?.once) return false;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      client.removeListener?.('clientReady', onReady);
+      client.removeListener?.('ready', onReady);
+      resolve(Boolean(ready || client?.isReady?.()));
+    };
+    const onReady = () => finish(true);
+    const timer = setTimeout(() => finish(false), Math.max(1000, Number(timeoutMs || 20000)));
+    client.once('clientReady', onReady);
+    client.once('ready', onReady);
+  });
+}
 
 function reportText(value = '', max = 300) {
   return String(value || '').trim().slice(0, max);
@@ -846,10 +875,20 @@ function matchReportAllowedUsers(report = {}) {
 
 async function sendSiteMatchReport(client, payload = {}) {
   const report = payload.report && typeof payload.report === 'object' ? payload.report : {};
+  const requestKey = reportText(report.id || report.hubId || '', 120);
+  if (requestKey && siteMatchReportRequests.has(requestKey)) {
+    return { ...siteMatchReportRequests.get(requestKey), duplicatePrevented: true };
+  }
   const channelId = String(
     SITE_MATCH_REPORT_CHANNEL_ID || payload.discordChannelId || ''
   ).trim();
-  if (!client?.channels?.fetch || !channelId) throw new Error('Canal oficial de resultados não configurado.');
+  if (!channelId) throw new Error('Canal oficial de resultados não configurado.');
+  if (!await waitForDiscordReady(client)) {
+    const error = new Error('O BOT ainda está conectando ao Discord. Tente novamente em instantes.');
+    error.code = 'DISCORD_NOT_READY';
+    throw error;
+  }
+  if (!client?.channels?.fetch) throw new Error('BOT Discord indisponível.');
   const channel = await client.channels.fetch(channelId).catch(() => null);
   if (!channel?.send) throw new Error('O BOT não consegue enviar no canal oficial de resultados.');
 
@@ -916,13 +955,13 @@ async function sendSiteMatchReport(client, payload = {}) {
     await sent.delete().catch(() => null);
     throw new Error('O Discord não retornou a URL do comprovante.');
   }
-  return {
+  return rememberSiteMatchReport(requestKey, {
     success: true,
     discordChannelId: channel.id,
     discordMessageId: sent.id,
     proofUrl: uploaded.url,
     jumpUrl: sent.url || ''
-  };
+  });
 }
 
 

@@ -13,8 +13,8 @@ if (source.includes(MARKER)) {
 }
 
 source = source.replace(
-  "const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';",
-  `const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';
+  "const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || process.env.SITE_REALTIME_TOKEN || '';",
+  `const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || process.env.SITE_REALTIME_TOKEN || '';
 // ${MARKER}
 const manualMessageRequests = new Map();
 const manualEditRequests = new Map();
