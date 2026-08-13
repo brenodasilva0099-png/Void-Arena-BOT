@@ -110,6 +110,7 @@ for (const forbidden of ['saveUser(', 'saveTeam(', 'deleteTeam(', 'saveTournamen
 expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-site-create')"), 'formulário do site não aguarda snapshot');
 expect(backupConfirmationPatch.includes("flushBackupAfterMutation('player-application-discord-create')"), 'formulário Discord não aguarda snapshot');
 expect(internalApi.includes("code: 'INTERNAL_TOKEN_NOT_CONFIGURED'"), 'API interna permite acesso sem token');
+expect(internalApi.includes('process.env.SITE_REALTIME_TOKEN'), 'API interna ignora o alias seguro da chave compartilhada');
 expect(internalApi.includes("app.get('/public/status'"), 'diagnóstico público do BOT ausente');
 expect(internalApi.includes('manual = false'), 'API interna não diferencia envio manual');
 expect(internalApi.includes('manual === true ? markManualSend(payload) : payload'), 'API interna não exige marcação manual');

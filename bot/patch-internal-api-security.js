@@ -14,6 +14,11 @@ function replaceOnce(from, to) {
   return true;
 }
 
+replaceOnce(
+  "const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || '';",
+  "const INTERNAL_TOKEN = process.env.BOT_API_KEY || process.env.INTERNAL_API_TOKEN || process.env.SITE_REALTIME_TOKEN || '';"
+);
+
 if (!src.includes("const { markManualSend } = require('./outboundMessageGuard');")) {
   replaceOnce(
     "const { extractDiscordMessageAttachments } = require('./discordClient');",
@@ -81,6 +86,7 @@ if (changed) fs.writeFileSync(file, src, 'utf8');
 const finalSource = fs.readFileSync(file, 'utf8');
 new Function(finalSource);
 for (const marker of [
+  'process.env.SITE_REALTIME_TOKEN',
   "code: 'INTERNAL_TOKEN_NOT_CONFIGURED'",
   'manual = false',
   'manual === true ? markManualSend(payload) : payload'
