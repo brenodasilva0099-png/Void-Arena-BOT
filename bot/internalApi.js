@@ -1,6 +1,6 @@
 const express = require('express');
 const { Readable } = require('node:stream');
-const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
+const { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const { extractDiscordMessageAttachments } = require('./discordClient');
 const { getPublicPanelAudit } = require('./publicPanelRefresh');
 const storage = require('../server/storage');
@@ -798,6 +798,157 @@ async function createEventValidationRequest(client, payload = {}) {
 
 
 
+const SITE_MATCH_REPORT_CHANNEL_ID = String(
+  process.env.CAPTAIN_STATS_RESULTS_CHANNEL_ID || '1518441859519877120'
+).trim();
+const SITE_MATCH_REPORT_MAX_BYTES = 8 * 1024 * 1024;
+const SITE_MATCH_REPORT_STAT_KEYS = ['goals', 'assists', 'interceptions', 'defenses', 'passes'];
+
+function reportText(value = '', max = 300) {
+  return String(value || '').trim().slice(0, max);
+}
+
+function reportProofAttachment(proof = '', proofMeta = {}) {
+  const raw = String(proof || '').trim();
+  const matched = raw.match(/^data:image\/(png|jpeg|jpg|webp);base64,([a-z0-9+/=\s]+)$/i);
+  if (!matched) throw new Error('Comprovante inválido. Use uma imagem PNG, JPG ou WEBP.');
+  const buffer = Buffer.from(matched[2].replace(/\s+/g, ''), 'base64');
+  if (!buffer.length || buffer.length > SITE_MATCH_REPORT_MAX_BYTES) {
+    throw new Error('O comprovante deve ter entre 1 byte e 8 MB.');
+  }
+  const extension = matched[1].toLowerCase().replace('jpeg', 'jpg');
+  const original = reportText(proofMeta?.name || '', 160).replace(/[^\p{L}\p{N}._-]+/gu, '-');
+  const name = (original || `sumula-${Date.now()}.${extension}`).replace(/\.(?:png|jpe?g|webp)$/i, '') + `.${extension}`;
+  return {
+    attachment: new AttachmentBuilder(buffer, { name }),
+    name
+  };
+}
+
+function reportTeam(report = {}, side = 'A') {
+  return report.match?.[`team${side}`] || report[`team${side}`] || {};
+}
+
+function reportPlayerStats(report = {}) {
+  return (Array.isArray(report.playerStats) ? report.playerStats : []).slice(0, 18).map((player) => {
+    const values = Object.fromEntries(SITE_MATCH_REPORT_STAT_KEYS.map((key) => [key, Math.max(0, Number(player?.[key] || 0))]));
+    return `• **${reportText(player.name || 'Jogador', 80)}** — G ${values.goals} · A ${values.assists} · I ${values.interceptions} · D ${values.defenses} · P ${values.passes}`;
+  });
+}
+
+function matchReportAllowedUsers(report = {}) {
+  return Array.from(new Set([
+    report.submittedBy?.discordId,
+    report.mvp?.discordId,
+    ...(Array.isArray(report.participants) ? report.participants : []).map((player) => player.discordId)
+  ].map((value) => String(value || '').trim()).filter((value) => /^\d{16,22}$/.test(value)))).slice(0, 100);
+}
+
+async function sendSiteMatchReport(client, payload = {}) {
+  const report = payload.report && typeof payload.report === 'object' ? payload.report : {};
+  const channelId = String(
+    SITE_MATCH_REPORT_CHANNEL_ID || payload.discordChannelId || ''
+  ).trim();
+  if (!client?.channels?.fetch || !channelId) throw new Error('Canal oficial de resultados não configurado.');
+  const channel = await client.channels.fetch(channelId).catch(() => null);
+  if (!channel?.send) throw new Error('O BOT não consegue enviar no canal oficial de resultados.');
+
+  const { attachment, name } = reportProofAttachment(report.proof, report.proofMeta);
+  const teamA = reportTeam(report, 'A');
+  const teamB = reportTeam(report, 'B');
+  const scoreA = Math.max(0, Number(report.scoreA ?? report.finalScoreA ?? 0));
+  const scoreB = Math.max(0, Number(report.scoreB ?? report.finalScoreB ?? 0));
+  const participants = Array.isArray(report.participants) ? report.participants : [];
+  const statsLines = reportPlayerStats(report);
+  const participantNames = participants.slice(0, 20).map((player) => reportText(player.name || 'Jogador', 60));
+  const additionalParticipants = Math.max(0, participants.length - participantNames.length);
+  const embed = new EmbedBuilder()
+    .setColor(0x7c3aed)
+    .setAuthor({ name: 'Hollow Nexus League · Central de Súmulas' })
+    .setTitle(`${reportText(teamA.name || 'Time A', 80)} ${scoreA} × ${scoreB} ${reportText(teamB.name || 'Time B', 80)}`)
+    .setDescription([
+      `**Competição:** ${reportText(report.competitionName || 'Amistoso / teste', 100)}`,
+      `**Fase:** ${reportText(report.round || 'Não informada', 80)}${report.game ? ` · ${reportText(report.game, 80)}` : ''}`,
+      `**MVP:** ${report.mvp?.discordId ? `<@${report.mvp.discordId}>` : reportText(report.mvp?.name || 'Não informado', 80)}`,
+      `**Enviado por:** ${report.submittedBy?.discordId ? `<@${report.submittedBy.discordId}>` : reportText(report.submittedBy?.name || 'Capitão', 80)}`,
+      '',
+      '⏳ **Aguardando validação da organização.** O ranking ainda não foi alterado.'
+    ].join('\n'))
+    .addFields(
+      {
+        name: `Participantes · ${participants.length}`,
+        value: participantNames.length
+          ? participantNames.map((name) => `• ${name}`).join('\n').slice(0, 1024) + (additionalParticipants ? `\n• +${additionalParticipants} jogador(es)` : '')
+          : 'Nenhum participante informado.',
+        inline: true
+      },
+      {
+        name: 'Estatísticas individuais',
+        value: statsLines.length ? statsLines.join('\n').slice(0, 1024) : 'Nenhuma estatística individual informada.',
+        inline: false
+      },
+      {
+        name: 'Conferência',
+        value: '[Abrir todos os envios no site](https://hollownexus.com.br/pages/sumulas.html)',
+        inline: false
+      }
+    )
+    .setImage(`attachment://${name}`)
+    .setFooter({ text: `Súmula ${reportText(report.id || report.hubId || 'site', 90)} · enviada pelo site` })
+    .setTimestamp(new Date(report.createdAt || Date.now()));
+
+  if (report.notes) embed.addFields({
+    name: 'Observação do responsável',
+    value: reportText(report.notes, 800),
+    inline: false
+  });
+
+  const sent = await channel.send({
+    embeds: [embed],
+    files: [attachment],
+    allowedMentions: {
+      parse: [],
+      users: matchReportAllowedUsers(report)
+    }
+  });
+  const uploaded = sent.attachments?.first?.();
+  if (!uploaded?.url) {
+    await sent.delete().catch(() => null);
+    throw new Error('O Discord não retornou a URL do comprovante.');
+  }
+  return {
+    success: true,
+    discordChannelId: channel.id,
+    discordMessageId: sent.id,
+    proofUrl: uploaded.url,
+    jumpUrl: sent.url || ''
+  };
+}
+
+
+async function resolveMatchReportAttachment(client, payload = {}) {
+  const channelId = String(payload.discordChannelId || '').trim();
+  const messageId = String(payload.discordMessageId || '').trim();
+  if (!/^\d{16,22}$/.test(channelId) || !/^\d{16,22}$/.test(messageId)) {
+    throw new Error('Canal ou mensagem do comprovante inválidos.');
+  }
+  const channel = await client?.channels?.fetch?.(channelId).catch(() => null);
+  if (!channel?.messages?.fetch) throw new Error('Canal do comprovante não encontrado.');
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (!message) throw new Error('Mensagem do comprovante não encontrada.');
+  const attachment = message.attachments?.first?.();
+  if (!attachment?.url) throw new Error('A mensagem não possui comprovante anexado.');
+  return {
+    success: true,
+    discordChannelId: channelId,
+    discordMessageId: messageId,
+    proofUrl: attachment.url,
+    contentType: attachment.contentType || '',
+    name: attachment.name || 'comprovante-da-partida'
+  };
+}
+
+
 async function getDiscordMemberRoles(client, discordId = '') {
   const safeDiscordId = String(discordId || '').trim();
   if (!safeDiscordId || !client?.guilds?.cache?.size) {
@@ -1094,6 +1245,22 @@ function startInternalApi({ client, port = 3002 } = {}) {
     }
   });
 
+  app.post('/internal/discord/send-match-report', async (req, res) => {
+    try {
+      return res.json(await sendSiteMatchReport(client, req.body || {}));
+    } catch (error) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.post('/internal/discord/resolve-match-report-attachment', async (req, res) => {
+    try {
+      return res.json(await resolveMatchReportAttachment(client, req.body || {}));
+    } catch (error) {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+  });
+
   app.patch('/internal/discord/edit-message', async (req, res) => {
     try {
       return res.json(await editDiscordMessage(client, req.body || {}));
@@ -1122,6 +1289,8 @@ module.exports = {
   listDiscordChannels,
   listDiscordMentions,
   sendDiscordMessage,
+  sendSiteMatchReport,
+  resolveMatchReportAttachment,
   editDiscordMessage,
   importDiscordHistory
 };
